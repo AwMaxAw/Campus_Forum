@@ -34,3 +34,5 @@ dev.vars
 .trae-html-share-packages/
 .tmp/
 tmp/
+.cache
+worker/node_modules

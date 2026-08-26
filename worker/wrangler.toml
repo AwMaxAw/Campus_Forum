@@ -1,0 +1,22 @@
+name = "campus-forum"
+main = "src/index.js"
+compatibility_date = "2024-08-06"
+compatibility_flags = ["nodejs_compat"]
+
+# 允许 Vercel 前端跨域调用
+# 更紧的限制在 Hono cors 中间件里再加一层
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "campus-forum"
+database_id = "e777191b-2068-4b38-96a1-19f818b855ce"
+
+# R2 存储桶（将来接头像/帖子图片），先注释掉，要用到时再打开
+# [[r2_buckets]]
+# binding = "AVATARS"
+# bucket_name = "campus-forum-avatars"
+#
+# [[r2_buckets]]
+# binding = "POST_IMAGES"
+# bucket_name = "campus-forum-post-images"
