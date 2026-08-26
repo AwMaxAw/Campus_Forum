@@ -191,7 +191,10 @@ async function doLogin() {
 function doLogout() {
   state.currentUser = null;
   localStorage.removeItem('currentUser');
+  // 如果当前 hash 已是 home，单纯改 hash 不会触发 hashchange，
+  // 需要手动调一次 route() 强制刷新顶栏 UI
   location.hash = 'home';
+  route();
 }
 
 async function doPost() {
