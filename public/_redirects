@@ -1,0 +1,16 @@
+# Netlify / Vercel / Cloudflare Pages 通用重定向规则
+# 语法（三列）：匹配路径  目标地址  HTTP 状态码
+# 官方文档：
+#   - Netlify:    https://docs.netlify.com/routing/redirects
+#   - Vercel:     自动识别 _redirects（同时也可用 vercel.json rewrites，_redirects 兼容性更好）
+#   - Cloudflare Pages: https://developers.cloudflare.com/pages/configuration/redirects/
+#
+# 说明：前端固定直接调用 Cloudflare Worker (https://campus-forum.max-li-ggm.workers.dev)，
+# 所以本 _redirects 是"最后兜底"——只有当浏览器由于 CORS/插件 或你手动想走
+# 同源 /api 路径 时才会生效。两条 200 代理（rewrite，不改变浏览器地址栏）：
+
+/api/*        https://campus-forum.max-li-ggm.workers.dev/api/:splat        200
+/api/auth/*   https://campus-forum.max-li-ggm.workers.dev/api/auth/:splat   200
+
+# 前端 SPA 兜底：所有未匹配路径都返回 index.html（避免手动刷新 #me/#post 等路由时报 404）
+/*            /index.html                                                      200

@@ -5,7 +5,38 @@
  * 401（token 过期）会自动清空本地登录态。
  */
 
-const API_BASE = 'https://campus-forum.max-li-ggm.workers.dev';
+/**
+ * 前端 API 封装（纯 fetch，零第三方依赖）
+ *
+ * 部署兼容性：
+ *   - API_BASE 固定指向 Cloudflare Worker 生产地址，所以不管前端部署在
+ *     Vercel / Netlify / Cloudflare Pages / 自定义域名 / GitHub Pages 都能直接连后端。
+ *   - 如需本地开发连本地 Worker，可在 index.html 里 <script> window.__CAMPUS_FORUM_API_BASE__ = 'http://localhost:8787' </script>
+ *     覆盖下面的默认值（会被读取，见 const API_BASE = ...）。
+ */
+
+const DEFAULT_API_BASE = 'https://campus-forum.max-li-ggm.workers.dev';
+const API_BASE = (typeof window !== 'undefined' && window.__CAMPUS_FORUM_API_BASE__)
+  ? window.__CAMPUS_FORUM_API_BASE__.replace(/\/$/, '')
+  : DEFAULT_API_BASE;
+
+// 分区枚举（category key 存库 / label 展示 / adminOnly 控制是否仅管理员可见+可选/可筛选）
+// 这个枚举必须与 worker/src/routes/posts.js 的 ALLOWED_CATEGORIES_KEYS 保持一致。
+export const ADMIN_ROLES = new Set(['admin', 'dev_admin']);
+export const CATEGORIES = [
+  { key: 'general', label: '综合', cssColor: '#6b7280', description: '没明确归属的日常讨论' },
+  { key: 'study',   label: '学习', cssColor: '#2563eb', description: '学习交流、作业、题目、考试经验' },
+  { key: 'club',    label: '社团', cssColor: '#9333ea', description: '社团招新、活动通知、兴趣同好' },
+  { key: 'life',    label: '生活', cssColor: '#059669', description: '校园生活、失物招领、吐槽、日常分享' },
+  { key: 'meta',    label: '公告', cssColor: '#dc2626', description: '管理员发布的论坛公告 / 使用须知（仅管理员可发帖到此分区）', adminOnly: true },
+];
+export function categoryMeta(key) {
+  return CATEGORIES.find(c => c.key === key) || { key: key || 'unknown', label: (key || '未知'), cssColor: '#6b7280', description: '' };
+}
+export function isCategoryAdminOnly(key) {
+  return !!categoryMeta(key).adminOnly;
+}
+
 const TOKEN_KEY = 'campus_forum_token';
 const USER_KEY = 'campus_forum_user';
 
@@ -74,28 +105,36 @@ async function request(path, { method = 'GET', body, needsAuth = true } = {}) {
   const init = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
 
+  const url = API_BASE + path;
   let res;
   try {
-    res = await fetch(API_BASE + path, init);
+    res = await fetch(url, init);
   } catch (e) {
-    return { success: false, message: `网络连接失败：${e.message}` };
+    // 常见根因：
+    //   - 浏览器插件/杀毒软件拦截 workers.dev 域名
+    //   - CORS 未对 origin 放行（旧版本 Worker CORS 白名单没包含当前部署域名）
+    //   - 当前网络不通 / DNS 污染
+    console.error(`[api request] 网络连接失败：${method} ${url}`, e && e.stack ? e.stack : e);
+    return { success: false, message: `网络连接失败：${e.message}（若你部署在 Netlify，请确认 Worker CORS 已放开 origin=*；或在 index.html 设置 window.__CAMPUS_FORUM_API_BASE__）` };
   }
 
-  let data;
+  let text = '';
   try {
-    data = await res.json();
-  } catch {
-    data = { success: false, message: `HTTP ${res.status}: ${res.statusText}` };
-  }
-  if (res.status === 401) {
-    // 登录、注册接口本身 401 不要清（否则会把刚刚登录成功的态清掉）
-    const isAuthEndpoint = path === '/api/auth/login' || path === '/api/auth/register';
-    if (!isAuthEndpoint) {
-      console.warn(`[auth] ⚠️ 请求 ${method} ${path} 返回 401，已自动清除登录态。原因：`, data);
-      clearAuth();
+    text = await res.text();
+    let data = JSON.parse(text);
+    if (res.status === 401) {
+      const isAuthEndpoint = path === '/api/auth/login' || path === '/api/auth/register';
+      if (!isAuthEndpoint) {
+        console.warn(`[auth] ⚠️ 请求 ${method} ${path} 返回 401，已自动清除登录态。响应：`, text.slice(0, 300));
+        clearAuth();
+      }
     }
+    return data;
+  } catch {
+    // 返回不是合法 JSON：可能是 CORS 被拦、Netlify/Vercel/Cloudflare 返回 500 页面、或 worker throw 500 直接给 HTML
+    console.error(`[api request] 返回非 JSON：${method} ${url} status=${res.status} ${res.statusText}。响应片段：`, text.slice(0, 200));
+    return { success: false, message: `响应格式错误（HTTP ${res.status}）：${(res.statusText || '').slice(0, 40) || '非 JSON 响应'}` };
   }
-  return data;
 }
 
 // ======================== 认证 ========================
@@ -174,13 +213,15 @@ export const posts = {
     return res;
   },
   /**
-   * 发新帖：前端现在已经把"分类选择"去掉，改让用户填多标签（tags 数组）。
-   * category 字段后端会自动根据 第一个合法 tag 或 general 来填，因此这里不传 category。
+   * 发新帖：分区 + 标签并存模式
+   *   - category: 字符串（CATEGORIES key，前端发帖页必填显式选一个）
+   *   - tags: 数组<string>（最多 5 个）
+   * 后端会优先采用前端传的 category；如果不合法 → 管理员级校验不通过 → 再回退 general。
    */
-  async create(title, content, tags = []) {
+  async create(title, content, tags = [], category = 'general') {
     if (!tokenCache) return { success: false, message: '请先登录' };
     if (!Array.isArray(tags)) tags = [];
-    return request('/api/posts', { method: 'POST', body: { title, content, tags } });
+    return request('/api/posts', { method: 'POST', body: { title, content, tags, category } });
   },
   async remove(id) {
     return request(`/api/posts/${id}`, { method: 'DELETE' });

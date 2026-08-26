@@ -30,6 +30,10 @@ function requireAuth() {
   });
 }
 
+// 分区白名单（必须与前端 js/api.js CATEGORIES.key 完全一致，避免映射不一致）
+const ALLOWED_CATEGORIES_KEYS = ['general', 'study', 'club', 'life', 'meta'];
+const ADMIN_ROLES = new Set(['admin', 'dev_admin']);
+
 // 目前 tags 在 DB 里存的是逗号分隔字符串（a,b,c），前后端都按数组来用
 function parseTags(str) {
   if (!str) return [];
@@ -235,12 +239,7 @@ posts.post('/', requireAuth(), async (c) => {
     const title = (body.title || '').trim();
     const content = (body.content || '').trim();
 
-    // --- 标签化改造：category 字段不再让用户主动选 ---
-    // 优先级：如果前端显式传了合法 category 就用；否则从 tags 里挑第一个非空当 category；
-    // 还是没有 → 默认 'general'
-    let category = (body.category || '').trim();
-    const allowedCategories = ['general', 'study', 'club', 'life', 'meta'];
-
+    // --- 分区 + 标签并存：先处理 tags（因为 tags 还要兜底 category）---
     // tags：接受 Array<string> 或 "a,b,c" 字符串（方便 curl 测试）；去重 + 最多 5 个；每个 ≤20 字
     const rawTags = Array.isArray(body.tags)
       ? body.tags
@@ -250,13 +249,28 @@ posts.post('/', requireAuth(), async (c) => {
     )].slice(0, 5);
     const tagsStr = cleanTags.join(',');
 
-    // 前端没有传 category 的情况下，用第一个标签近似分类；仍旧不合法 → general
-    if (!allowedCategories.includes(category)) {
-      const picked = cleanTags[0] && cleanTags[0].toLowerCase();
-      if (picked && allowedCategories.includes(picked)) {
-        category = picked;
-      } else {
+    // 分区：前端显式选分区优先，不合法再 tags 兜底，仍不合法 → general
+    let category = (body.category || '').trim();
+    const isAdmin = ADMIN_ROLES.has(String(author.role || ''));
+
+    // 1) 前端传的 category 若不在白名单 → 先清零（等下走 tags 兜底 / general）
+    if (!ALLOWED_CATEGORIES_KEYS.includes(category)) {
+      category = '';
+    }
+    // 2) meta 分区仅管理员：前端能传、但非管理员一律拦截 → 403（避免绕过 UI 直接调接口灌水公告）
+    if (category === 'meta' && !isAdmin) {
+      return fail('只有管理员才能发「公告」分区的帖子', 403);
+    }
+    // 3) 仍然无合法 category：用 tags 里第一个（若恰好是分区英文 key 则命中）→ 还是空 → general
+    if (!category) {
+      const picked = cleanTags[0] && ALLOWED_CATEGORIES_KEYS.includes(cleanTags[0].toLowerCase())
+        ? cleanTags[0].toLowerCase()
+        : null;
+      // 保险：tags 兜底也不能给非管理员塞 meta（tag 名叫 meta 的情况虽然罕见）
+      if (picked === 'meta' && !isAdmin) {
         category = 'general';
+      } else {
+        category = picked || 'general';
       }
     }
 
@@ -267,7 +281,7 @@ posts.post('/', requireAuth(), async (c) => {
     if (cleanTags.some(t => /["'\\<>{}]/.test(t))) return fail('标签不能包含特殊字符');
 
     const result = await db
-      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags) VALUES (?, ?, ?, ?, ?)`)
+      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
       .bind(uid, title, content, category, tagsStr)
       .run();
 

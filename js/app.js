@@ -19,24 +19,34 @@
 
 import * as api from './api.js?v=20260826-debugauth';
 
-// ==================== 工具函数 ====================
-function escapeHtml(s) {
-  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
+// 分区元数据：与 js/api.js CATEGORIES 对齐（后者是单一事实源，这里再包一层方便旧代码继续用 CATEGORY_LABEL）
+const CATEGORIES = api.CATEGORIES || [
+  { key: 'general', label: '综合', cssColor: '#6b7280' },
+  { key: 'study',   label: '学习', cssColor: '#2563eb' },
+  { key: 'club',    label: '社团', cssColor: '#9333ea' },
+  { key: 'life',    label: '生活', cssColor: '#059669' },
+  { key: 'meta',    label: '公告', cssColor: '#dc2626', adminOnly: true },
+];
+const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
+const CATEGORY_COLOR = Object.fromEntries(CATEGORIES.map(c => [c.key, c.cssColor || '#6b7280']));
+function categoryBadgeHtml(key, opts = {}) {
+  const label = CATEGORY_LABEL[key] || key;
+  const color = CATEGORY_COLOR[key] || '#6b7280';
+  const light = toLightBg(color);
+  const onclick = opts.clickable
+    ? `onclick="event.stopPropagation();setHomeFilter('category',${JSON.stringify(key)})" title="按「${label}」分区筛选" style="cursor:pointer"`
+    : '';
+  return `<span ${onclick} style="color:${color};background:${light};padding:1px 8px;border-radius:12px;font-size:12px;margin-right:6px;font-weight:500">${escapeHtml(label)}</span>`;
 }
-function formatTime(iso) {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    const p = n => String(n).padStart(2,'0');
-    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-  } catch { return iso; }
+function toLightBg(hex) {
+  // #RRGGBB → 250 左右浅色背景（和文字颜色同色相）
+  const h = hex.replace('#', '');
+  if (h.length !== 6) return '#f3f4f6';
+  const r = Math.round((parseInt(h.slice(0, 2), 16) + 255 * 9) / 10);
+  const g = Math.round((parseInt(h.slice(2, 4), 16) + 255 * 9) / 10);
+  const b = Math.round((parseInt(h.slice(4, 6), 16) + 255 * 9) / 10);
+  return `rgb(${r},${g},${b})`;
 }
-const CATEGORY_LABEL = {
-  general: '综合', study: '学习', club: '社团', life: '生活', meta: '站务'
-};
 
 // ==================== 顶栏 ====================
 async function renderTopBar() {
@@ -91,15 +101,14 @@ function postCard(p, opts = {}) {
   const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
   const clickable = opts.allowClick ? 'clickable' : '';
   const onclickAttr = opts.allowClick ? `onclick="location.hash='#detail/${p.id}'"` : '';
-  const catLabel = CATEGORY_LABEL[p.category] || p.category;
   const pinBadge = p.isPinned
     ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
     : '';
+  const catBadge = categoryBadgeHtml(p.category, { clickable: opts.allowClick });
   return `
     <div class="card ${clickable}" ${onclickAttr} data-post-id="${p.id}">
       <div class="meta">
-        ${pinBadge}<span style="color:#2563eb;background:#dbeafe;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">${escapeHtml(catLabel)}</span>
-        <span>${escapeHtml(author)}</span>
+        ${pinBadge}${catBadge}<span>${escapeHtml(author)}</span>
         <span>·</span>
         <span>${escapeHtml(time)}</span>
       </div>
@@ -119,6 +128,7 @@ function getHomeFilters() {
   const [pathPart, queryPart] = raw.split('?');
   const qp = new URLSearchParams(queryPart || '');
   return {
+    category: qp.get('cat') || '',
     q: qp.get('q') || '',
     tag: qp.get('tag') || '',
     dateFrom: qp.get('from') || '',
@@ -129,6 +139,7 @@ function getHomeFilters() {
 }
 function buildHomeHash(f) {
   const qp = new URLSearchParams();
+  if (f.category) qp.set('cat', f.category);
   if (f.q) qp.set('q', f.q);
   if (f.tag) qp.set('tag', f.tag);
   if (f.dateFrom) qp.set('from', f.dateFrom);
@@ -140,9 +151,9 @@ function buildHomeHash(f) {
 window.setHomeFilter = function setHomeFilter(key, value) {
   const f = getHomeFilters();
   if (key === 'sort') f.sortBy = value || 'latest';
+  else if (key === 'category') f.category = value || '';
   else f[key] = value || '';
   location.hash = buildHomeHash(f);
-  // hash 不变（比如只是清除）时不会触发 route()，手动调
   setTimeout(route, 0);
 };
 // 帖子 chip 点一下是按 tag 搜；但如果首页没有任何查询条件且点了多个 tag chip，
@@ -152,11 +163,12 @@ window.clearHomeFilters = function clearHomeFilters() {
   setTimeout(route, 0);
 };
 
-// ==================== 视图：首页（含搜索条 + 热门标签 chip）====================
+// ==================== 视图：首页（含分区 Tab + 搜索条 + 热门标签 chip）====================
 async function renderHome(app) {
   const filters = getHomeFilters();
   const loggedIn = api.isLoggedIn();
   const me = loggedIn ? api.getCurrentUser() : null;
+  const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
 
   const topBanner = !loggedIn
     ? `<div class="card">
@@ -167,7 +179,7 @@ async function renderHome(app) {
        </div>
        <div class="card">
          <h3>技术栈</h3>
-         <p>✅ 前端：Vercel 托管的纯 HTML + 原生 JS</p>
+         <p>✅ 前端：Vercel / Netlify 托管的纯 HTML + 原生 JS</p>
          <p>✅ 后端：Cloudflare Worker + D1（零服务器成本）</p>
          <p>✅ 密码：PBKDF2-HMAC-SHA-256 哈希（Web Crypto 内置，不裸存）</p>
          <p>✅ 认证：JWT（HMAC-SHA-256，7 天有效期）</p>
@@ -177,10 +189,28 @@ async function renderHome(app) {
          <button onclick="location.hash='post'">+ 发新帖</button>
        </div>`;
 
+  // 分区 Tab（显示在搜索条顶部 / 左上）：按 CATEGORIES 顺序，meta 仅管理员会"看到它是管理员专属"的角标
+  const tabItems = [{ key: '', label: '全部' }, ...CATEGORIES.filter(c => isAdmin || !c.adminOnly).map(c => ({ key: c.key, label: c.label, cssColor: c.cssColor, adminOnly: !!c.adminOnly }))];
+  const tabBarHtml = `<div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+    ${tabItems.map(tab => {
+      const active = (tab.key === '') ? !filters.category : (tab.key === filters.category);
+      const color = tab.cssColor || '#2563eb';
+      const style = active
+        ? `background:${color};color:#fff;border-color:${color}`
+        : `background:#fff;color:${tab.cssColor || '#333'};border-color:#d2d2d7`;
+      const adminBadge = tab.adminOnly ? '<small style="margin-left:4px;opacity:.9">🔒管</small>' : '';
+      return `<button onclick="setHomeFilter('category',${JSON.stringify(tab.key)})"
+          style="padding:4px 12px;border-radius:999px;border:1px solid;font-size:13px;cursor:pointer;transition:.15s;${style}">
+          ${tab.label}${adminBadge}
+        </button>`;
+    }).join('')}
+  </div>`;
+
   app.innerHTML = `
     ${topBanner}
     <!-- 搜索条（所有访客都看得到） -->
     <div class="card search-panel">
+      ${tabBarHtml}
       <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索帖子</h3>
       <div class="search-row">
         <input id="sqInput" placeholder="关键字（搜标题/正文，如：数学、社团招新）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
@@ -233,6 +263,7 @@ async function renderHome(app) {
   const listTitleEl = document.getElementById('listTitle');
   try {
     const postFilters = {
+      category: filters.category || undefined,
       q: filters.q || undefined,
       tag: filters.tag || undefined,
       dateFrom: filters.dateFrom || undefined,
@@ -251,13 +282,16 @@ async function renderHome(app) {
 
     // 列表标题：有筛选条件就显示"搜索结果 N 条"
     const applied = (res.appliedFilters || {});
-    const hasFilter = applied.q || applied.tag || applied.dateFrom || applied.dateTo;
-    if (listTitleEl) listTitleEl.textContent = hasFilter ? `搜索结果（${total} 条）` : (applied.sortBy==='hot' ? '🔥 最热帖子' : '最新帖子');
+    const hasFilter = applied.category || applied.q || applied.tag || applied.dateFrom || applied.dateTo;
+    const catLabelForTitle = applied.category ? (CATEGORY_LABEL[applied.category] || applied.category) : null;
+    const prefix = catLabelForTitle ? `「${catLabelForTitle}」` : '';
+    if (listTitleEl) listTitleEl.textContent = hasFilter ? `${prefix}${prefix ? ' ' : ''}搜索结果（${total} 条）` : (applied.sortBy==='hot' ? '🔥 最热帖子' : '最新帖子');
 
-    // 条件徽章（q/tag/日期区间，点 × 清掉单个）
+    // 条件徽章（category / q / tag / 日期区间，点 × 清掉单个）
     const badgeBox = document.getElementById('filterBadges');
     if (badgeBox) {
       const badges = [];
+      if (applied.category) badges.push(`<span class="filter-badge">分区：<b>${escapeHtml(CATEGORY_LABEL[applied.category] || applied.category)}</b><button class="chip-close" onclick="setHomeFilter('category','')">×</button></span>`);
       if (applied.q) badges.push(`<span class="filter-badge">关键字：<b>${escapeHtml(applied.q)}</b><button class="chip-close" onclick="setHomeFilter('q','')">×</button></span>`);
       if (applied.tag) badges.push(`<span class="filter-badge">标签：<b>#${escapeHtml(applied.tag)}</b><button class="chip-close" onclick="setHomeFilter('tag','')">×</button></span>`);
       if (applied.dateFrom) badges.push(`<span class="filter-badge">从 <b>${escapeHtml(applied.dateFrom)}</b><button class="chip-close" onclick="setHomeFilter('dateFrom','')">×</button></span>`);
@@ -326,16 +360,45 @@ function renderRegister(app) {
   document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
 }
 
-// 发帖标签：前端内部状态（renderPost 渲染 chip 用，doPost 时读它）
+// 发帖状态：标签数组 + 选中分区 key
 let draftPostTags = [];
+let draftPostCategory = 'general';
 
 function renderPost(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
-  draftPostTags = []; // 每次进发新帖页都清空
+  const me = api.getCurrentUser();
+  const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
+  draftPostTags = [];
+  draftPostCategory = 'general'; // 每次进新帖页都重置为默认「综合」
+
+  // 分区单选 chip：meta 仅管理员可见
+  const visibleCategories = CATEGORIES.filter(c => isAdmin || !c.adminOnly);
 
   app.innerHTML = `
     <div class="card">
       <h3>发新帖</h3>
+
+      <div style="margin-bottom:14px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:8px">
+          📂 分区（必选，单选）
+        </label>
+        <div id="categoryChips" style="display:flex;flex-wrap:wrap;gap:8px">
+          ${visibleCategories.map(c => {
+            const active = c.key === draftPostCategory;
+            const color = c.cssColor || '#6b7280';
+            const bg = active ? color : '#fff';
+            const fg = active ? '#fff' : color;
+            const border = active ? color : (c.adminOnly ? '#dc2626' : '#d2d2d7');
+            const pad = c.adminOnly ? '<small style="margin-left:4px;opacity:.9">🔒管</small>' : '';
+            const desc = c.description ? `title="${escapeHtml(c.description)}"` : '';
+            return `<button type="button" data-cat="${escapeHtml(c.key)}" ${desc}
+                style="padding:6px 14px;border:1px solid ${border};border-radius:999px;font-size:13px;background:${bg};color:${fg};cursor:pointer;transition:.15s;font-weight:${active?600:500}">
+                ${escapeHtml(c.label)}${pad}
+              </button>`;
+          }).join('')}
+        </div>
+      </div>
+
       <input id="titleInput" placeholder="标题（必填，100字内）" maxlength="100">
       <textarea id="contentInput" placeholder="说点什么...（必填，2000字内）" maxlength="2000"></textarea>
 
@@ -349,8 +412,7 @@ function renderPost(app) {
                maxlength="20"
                style="width:100%">
         <p class="hint" style="margin:2px 0 0 0">
-          💡 小技巧：<b>回车 / 逗号 / 空格 / 中文顿号</b> 都能立刻确认一个标签；chip 右
-          上角的 × 可以删除。标签也用于以后搜索归类（帖子不再手动选"分区"，系统自动根据第一个标签推断）。
+          💡 分区用于大分类（综合/学习/社团/生活/公告），标签用于细分话题，两者可以同时使用一起搜索。
         </p>
       </div>
 
@@ -358,6 +420,28 @@ function renderPost(app) {
       <button class="secondary" onclick="location.hash='home'">取消</button>
     </div>
   `;
+
+  // --- 分区单选 chip 逻辑 ---
+  const catBox = document.getElementById('categoryChips');
+  function reflowCategoryChips() {
+    catBox.querySelectorAll('button[data-cat]').forEach(btn => {
+      const key = btn.getAttribute('data-cat');
+      const meta = CATEGORIES.find(c => c.key === key);
+      const active = key === draftPostCategory;
+      const color = meta && meta.cssColor ? meta.cssColor : '#6b7280';
+      btn.style.background = active ? color : '#fff';
+      btn.style.color = active ? '#fff' : color;
+      btn.style.borderColor = active ? color : (meta && meta.adminOnly ? '#dc2626' : '#d2d2d7');
+      btn.style.fontWeight = active ? '600' : '500';
+    });
+  }
+  catBox.querySelectorAll('button[data-cat]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      draftPostCategory = String(btn.getAttribute('data-cat') || '');
+      reflowCategoryChips();
+    });
+  });
+  reflowCategoryChips();
 
   // --- 多标签 chip 逻辑 ---
   const tagInput = document.getElementById('tagInput');
@@ -415,7 +499,15 @@ async function renderDetail(app, postId) {
   }
   const p = postRes.data;
   const me = api.isLoggedIn() ? api.getCurrentUser() : null;
-  const catLabel = CATEGORY_LABEL[p.category] || p.category;
+  const pinBadge = p.isPinned
+    ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
+    : '';
+  const catBadge = categoryBadgeHtml(p.category);
+  const tagsHtml = (Array.isArray(p.tags) && p.tags.length)
+    ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+         ${p.tags.map(t => `<span class="tag-chip" onclick="location.hash='home';setTimeout(()=>setHomeFilter('tag',${JSON.stringify(t)}),0)" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+       </div>`
+    : '';
 
   app.innerHTML = `
     <div style="margin-bottom:10px">
@@ -423,13 +515,13 @@ async function renderDetail(app, postId) {
     </div>
     <div class="card detail-header">
       <div class="meta">
-        <span style="color:#2563eb;background:#dbeafe;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">${escapeHtml(catLabel)}</span>
-        <span>${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>
+        ${pinBadge}${catBadge}<span>${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>
         <span>·</span><span>${escapeHtml(formatTime(p.createdAt))}</span>
         <span>·</span><span>👁 ${p.viewCount} 浏览</span>
       </div>
       <h2>${escapeHtml(p.title)}</h2>
       <div class="detail-body">${escapeHtml(p.content)}</div>
+      ${tagsHtml}
       <div class="action-bar">
         <button id="likeBtn" class="${p.isLiked ? 'active-like' : ''}">
           ${p.isLiked ? '♥ 已赞' : '♡ 点赞'} <span id="likeCount">${p.likeCount}</span>
@@ -969,10 +1061,11 @@ window.doPost = async function doPost() {
   }
   if (!title || !content) return alert('标题和内容不能为空');
   const tags = [...draftPostTags]; // 拷贝一份，防止发布中用户还在改 chip
+  const category = String(draftPostCategory || 'general');
   const btn = document.getElementById('postBtn');
   btn.disabled = true; btn.textContent = '发布中...';
   try {
-    const r = await api.posts.create(title, content, tags);
+    const r = await api.posts.create(title, content, tags, category);
     if (r.success) location.hash = 'home';
     else alert(r.message || '发布失败');
   } finally {

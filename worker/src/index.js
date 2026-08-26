@@ -52,16 +52,13 @@ const app = new Hono();
 app.use(
   '*',
   cors({
-    origin: (origin) => {
-      const allowed = [
-        /^https:\/\/campus-forum.*\.vercel\.app$/,
-        /^https:\/\/awmaxaw\.github\.io$/,
-        /^http:\/\/localhost:\d+$/,
-      ];
-      return allowed.some(r => r.test(origin)) ? origin : 'null';
-    },
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    // 五中校园论坛是公开 API，不依赖 Cookie 鉴权（JWT 放在 Authorization header）。
+    // 放开 origin=* 可支持任意前端部署域名：Vercel / Netlify / Cloudflare Pages / 自定义域名 / GitHub Pages / localhost。
+    // 这比维护一份白名单稳得多（否则每个新部署域名都要改 Worker 并重新 deploy）。
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
+    exposeHeaders: ['X-Request-Id'],
     credentials: false,
     maxAge: 86400,
   })
