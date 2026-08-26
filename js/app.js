@@ -17,7 +17,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js';
+import * as api from './api.js?v=20260826-bustcache2';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
