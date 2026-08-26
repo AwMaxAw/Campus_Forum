@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'member',      -- member / admin / dev_admin
   avatar_url TEXT,
   bio TEXT,                                -- 简介
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT                          -- 最后修改时间（改密码 / 改资料时更新；为兼容 D1 ADD COLUMN，不带 NOT NULL 与不稳定 DEFAULT）
 );
 
 -- 帖子表
@@ -109,13 +110,21 @@ CREATE INDEX IF NOT EXISTS idx_messages_from_to ON messages(from_uid, to_uid, cr
 CREATE INDEX IF NOT EXISTS idx_messages_to_read ON messages(to_uid, is_read, created_at DESC);
 
 -- ============ 种子数据：预置管理员用户 + 2 条欢迎帖 ============
--- 注意：密码是 bcrypt(admin123)。真实部署前请改密码！
--- 先检查 users 里有没有占位 admin，避免重复插入
+-- 注意：
+--   - 本项目密码哈希格式是 pbkdf2_sha256$100000$salt$hash
+--     （见 worker/src/utils/auth.js hashPassword / verifyPassword）
+--   - 每次生成的 salt 不同，所以 hash 不能静态写死在 schema.sql 里。
+--   - 真实部署步骤（任选其一）：
+--       A) 注册一个普通账号，之后用 wrangler d1 execute 把它 UPDATE 成 dev_admin。
+--       B) 用下面这条 node 命令生成你想要的密码的 hash，再把 INSERT 里的
+--          <GENERATED_PBKDF2_HASH> 替换掉：
+--          node -e "const {pbkdf2Sync,randomBytes}=require('crypto');\
+--          const s=randomBytes(16),d=pbkdf2Sync('你的密码',s,100000,32,'sha256');\
+--          console.log('pbkdf2_sha256$100000$'+s.toString('hex')+'$'+d.toString('hex'));"
+--   - 下面例子占位符使用前必须先替换，否则登录会失败。
 INSERT OR IGNORE INTO users (uid, password_hash, nickname, role) VALUES (
   '00000000',
-  -- bcrypt hash of 'admin123' (rounds=10)
-  -- 你也可以在本地用 node -e "console.log(require('bcryptjs').hashSync('你想设的密码',10))" 重新生成
-  '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
+  '<GENERATED_PBKDF2_HASH_OF_admin123>',
   '系统管理员',
   'dev_admin'
 );
