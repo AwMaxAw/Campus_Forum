@@ -17,9 +17,25 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260826-debugauth';
+import * as api from './api.js?v=20260827-cats';
 
-// 分区元数据：与 js/api.js CATEGORIES 对齐（后者是单一事实源，这里再包一层方便旧代码继续用 CATEGORY_LABEL）
+// ==================== 工具函数 ====================
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function formatTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return iso; }
+}
+
+// ==================== 分区元数据 ====================
 const CATEGORIES = api.CATEGORIES || [
   { key: 'general', label: '综合', cssColor: '#6b7280' },
   { key: 'study',   label: '学习', cssColor: '#2563eb' },
