@@ -1,21 +1,23 @@
 /**
  * 五中校园论坛 - Cloudflare Worker 入口
  *
- * 第一阶段：最小骨架，仅支持 2 个路由（先用临时 uid，不做 JWT 认证）
- *   GET  /api/posts          → 取帖子列表（带分页）
- *   POST /api/posts          → 发新帖（临时用 query ?uid=xxx 鉴权，下一步接 JWT）
- *   GET  /api/health         → 健康检查
- *
- * 下一阶段：接 auth.js（注册/登录/JWT/bcrypt）
+ * 阶段 3：接入账号体系（PBKDF2 密码哈希 + JWT）
+ *   GET  /api/health            健康检查
+ *   POST /api/auth/register     注册
+ *   POST /api/auth/login        登录 → 返回 JWT
+ *   GET  /api/auth/me           取当前用户（需 Authorization: Bearer <token>）
+ *   GET  /api/posts             帖子列表（公开，无需登录）
+ *   POST /api/posts             发新帖（需 JWT）
  */
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { jwt } from 'hono/jwt';
+import authRoutes from './routes/auth.js';
 
 const app = new Hono();
 
-// 允许 Vercel / GitHub Pages / 本地开发三种前端来源跨域
-// 更严的限制在业务层
+// ==================== CORS（允许三种前端） ====================
 app.use(
   '*',
   cors({
@@ -34,6 +36,9 @@ app.use(
   })
 );
 
+// ==================== 账号路由（/api/auth/*） ====================
+app.route('/api/auth', authRoutes);
+
 // ==================== 健康检查 ====================
 app.get('/api/health', (c) => {
   return c.json({
@@ -44,8 +49,6 @@ app.get('/api/health', (c) => {
 });
 
 // ==================== 工具函数 ====================
-
-/** 把 D1 返回的 snake_case 行对象转成前端友好的格式 */
 function mapPostRow(row) {
   if (!row) return null;
   return {
@@ -53,7 +56,7 @@ function mapPostRow(row) {
     title: row.title,
     content: row.content,
     authorUid: row.author_uid,
-    authorNickname: row.author_nickname || null,   // 有 JOIN 时用
+    authorNickname: row.author_nickname || null,
     category: row.category,
     tags: row.tags ? row.tags.split(',') : [],
     viewCount: row.view_count,
@@ -66,7 +69,6 @@ function mapPostRow(row) {
   };
 }
 
-/** 统一响应格式，跟前端 api 对象返回结构对齐 */
 function ok(data, extra) {
   return { success: true, data, ...(extra || {}) };
 }
@@ -77,7 +79,16 @@ function fail(message, status = 400) {
   });
 }
 
-// ==================== 帖子列表 ====================
+/**
+ * 从 Authorization 头里取 Bearer <token>，再用 JWT 中间件解析。
+ * jwt 中间件本身是 Hono 官方提供的，但它默认从 c.env.JWT_SECRET 取 key，
+ * 我们要动态取 c.env.JWT_SECRET，所以用一个小函数包一下。
+ */
+function requireAuth() {
+  return jwt({ secret: (c) => c.env.JWT_SECRET, alg: 'HS256' });
+}
+
+// ==================== 帖子列表（公开，不用登录） ====================
 app.get('/api/posts', async (c) => {
   const { searchParams } = new URL(c.req.url);
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
@@ -87,7 +98,6 @@ app.get('/api/posts', async (c) => {
 
   const db = c.env.DB;
 
-  // 基础 WHERE：隐藏帖只有管理员能看到，这阶段先不过滤管理员身份，直接都不显示
   const whereParts = ['p.is_hidden = 0'];
   const params = [];
   if (category) {
@@ -96,14 +106,12 @@ app.get('/api/posts', async (c) => {
   }
   const whereSQL = whereParts.join(' AND ');
 
-  // 总数（用于前端分页）
   const countResult = await db
     .prepare(`SELECT COUNT(*) AS c FROM posts p WHERE ${whereSQL}`)
     .bind(...params)
     .first();
   const total = countResult.c;
 
-  // 分页结果 + JOIN 作者昵称
   const rows = await db
     .prepare(
       `SELECT p.*, u.nickname AS author_nickname
@@ -121,15 +129,19 @@ app.get('/api/posts', async (c) => {
   }));
 });
 
-// ==================== 发新帖 ====================
-// 注意：这阶段鉴权简化成 query.uid，下一步接 JWT 会改成 Authorization: Bearer <token>
-app.post('/api/posts', async (c) => {
-  // 临时鉴权：query 参数里要带 uid（8 位数字），否则 401
-  const { searchParams } = new URL(c.req.url);
-  const uid = searchParams.get('uid');
-  if (!uid || !/^\d{8}$/.test(uid)) {
-    return fail('需要登录（临时鉴权：?uid=8位数字）', 401);
-  }
+// ==================== 发新帖（需 JWT） ====================
+app.post('/api/posts', requireAuth(), async (c) => {
+  const payload = c.get('jwtPayload');
+  const uid = payload && payload.sub;
+  if (!uid) return fail('需要登录', 401);
+
+  // 发帖前再验证一下用户是否存在（防止 JWT 里的 sub 是已删除用户）
+  const db = c.env.DB;
+  const author = await db
+    .prepare('SELECT uid, role FROM users WHERE uid = ?')
+    .bind(uid)
+    .first();
+  if (!author) return fail('用户不存在', 401);
 
   let body;
   try {
@@ -149,22 +161,6 @@ app.post('/api/posts', async (c) => {
   const allowedCategories = ['general', 'study', 'club', 'life', 'meta'];
   if (!allowedCategories.includes(category)) return fail(`分区必须是 ${allowedCategories.join('/')}`);
 
-  const db = c.env.DB;
-
-  // 作者不存在？先自动创建一个（简化版，下一阶段接注册流程时移除）
-  const existingUser = await db
-    .prepare('SELECT uid FROM users WHERE uid = ?')
-    .bind(uid)
-    .first();
-  if (!existingUser) {
-    // bcrypt hash of '123456' —— 占位，用户注册时会覆盖
-    const defaultHash = '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
-    await db
-      .prepare('INSERT INTO users (uid, password_hash, nickname) VALUES (?, ?, ?)')
-      .bind(uid, defaultHash, `用户${uid}`)
-      .run();
-  }
-
   // 插入帖子
   const result = await db
     .prepare(
@@ -176,7 +172,6 @@ app.post('/api/posts', async (c) => {
 
   const postId = result.meta.last_row_id;
 
-  // 读回刚插入的行，返回完整对象
   const created = await db
     .prepare(
       `SELECT p.*, u.nickname AS author_nickname
