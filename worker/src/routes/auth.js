@@ -1,9 +1,10 @@
 /**
- * 账号路由：注册 / 登录 / 当前用户
+ * 账号路由：注册 / 登录 / 当前用户 / 修改密码
  *
- * POST /api/auth/register  → 创建新用户
- * POST /api/auth/login     → 验证账号密码 → 返回 JWT
- * GET  /api/auth/me        → 用 Authorization: Bearer <JWT> 取当前用户
+ * POST   /api/auth/register  → 创建新用户
+ * POST   /api/auth/login     → 验证账号密码 → 返回 JWT
+ * GET    /api/auth/me        → 用 Authorization: Bearer <JWT> 取当前用户
+ * PATCH  /api/auth/me        → 修改密码（需旧密码验证 + JWT）
  */
 
 import { Hono } from 'hono';
@@ -88,61 +89,109 @@ auth.post('/register', async (c) => {
 
 // ==================== 登录 ====================
 auth.post('/login', async (c) => {
-  const db = c.env.DB;
-  let body;
   try {
-    body = await c.req.json();
-  } catch {
-    return fail('请求体必须是合法 JSON');
+    const db = c.env.DB;
+    let body;
+    try {
+      body = await c.req.json();
+    } catch {
+      return fail('请求体必须是合法 JSON');
+    }
+
+    const uid = (body.uid || '').trim();
+    const password = (body.password || '').toString();
+    if (!isUidValid(uid)) return fail('请输入 8 位数字 UID');
+    if (!password) return fail('请输入密码');
+
+    const user = await db
+      .prepare('SELECT * FROM users WHERE uid = ?')
+      .bind(uid)
+      .first();
+
+    // 用户不存在 → 别告诉前端是"UID错了"还是"密码错了"，统一一条信息避免枚举
+    const genericMsg = 'UID 或密码不正确';
+    if (!user) return fail(genericMsg, 401);
+
+    const pwOk = await verifyPassword(password, user.password_hash);
+    if (!pwOk) return fail(genericMsg, 401);
+
+    // 被软删/封禁？扩展字段先预留着，现在不启用
+    // if (user.is_banned) return fail('账号已被封禁', 403);
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      sub: user.uid,
+      role: user.role,
+      iat: now,
+      exp: now + JWT_TTL_SEC,
+    };
+    const token = await sign(payload, c.env.JWT_SECRET, 'HS256');
+
+    return c.json(ok(serializeUser(user), {
+      token,
+      tokenExpiresAt: new Date((now + JWT_TTL_SEC) * 1000).toISOString(),
+    }));
+  } catch (e) {
+    return fail(`[login] ${e.name}: ${e.message}`, 500);
   }
-
-  const uid = (body.uid || '').trim();
-  const password = (body.password || '').toString();
-  if (!isUidValid(uid)) return fail('请输入 8 位数字 UID');
-  if (!password) return fail('请输入密码');
-
-  const user = await db
-    .prepare('SELECT * FROM users WHERE uid = ?')
-    .bind(uid)
-    .first();
-
-  // 用户不存在 → 别告诉前端是"UID错了"还是"密码错了"，统一一条信息避免枚举
-  const genericMsg = 'UID 或密码不正确';
-  if (!user) return fail(genericMsg, 401);
-
-  const pwOk = await verifyPassword(password, user.password_hash);
-  if (!pwOk) return fail(genericMsg, 401);
-
-  // 被软删/封禁？扩展字段先预留着，现在不启用
-  // if (user.is_banned) return fail('账号已被封禁', 403);
-
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    sub: user.uid,
-    role: user.role,
-    iat: now,
-    exp: now + JWT_TTL_SEC,
-  };
-  const token = await sign(payload, c.env.JWT_SECRET, 'HS256');
-
-  return c.json(ok(serializeUser(user), {
-    token,
-    tokenExpiresAt: new Date((now + JWT_TTL_SEC) * 1000).toISOString(),
-  }));
 });
 
 // ==================== 当前用户（JWT 中间件保护） ====================
 auth.get('/me', requireAuth(), async (c) => {
-  const payload = c.get('jwtPayload');
-  if (!payload || !payload.sub) return fail('无效的 token', 401);
+  try {
+    const payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) return fail('无效的 token', 401);
 
-  const user = await c.env.DB
-    .prepare('SELECT * FROM users WHERE uid = ?')
-    .bind(payload.sub)
-    .first();
+    const user = await c.env.DB
+      .prepare('SELECT * FROM users WHERE uid = ?')
+      .bind(payload.sub)
+      .first();
 
-  if (!user) return fail('用户不存在', 401);
-  return c.json(ok(serializeUser(user)));
+    if (!user) return fail('用户不存在', 401);
+    return c.json(ok(serializeUser(user)));
+  } catch (e) {
+    return fail(`[me] ${e.name}: ${e.message}`, 500);
+  }
+});
+
+// ==================== 修改密码（需要登录 + 旧密码验证） ====================
+auth.patch('/me', requireAuth(), async (c) => {
+  try {
+    const payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) return fail('无效的 token', 401);
+    const uid = payload.sub;
+
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+    const oldPwd = (body.old_password || body.oldPassword || '').toString();
+    const newPwd = (body.new_password || body.newPassword || '').toString();
+    const confirmPwd = (body.confirm_password || body.confirmPassword || '').toString();
+
+    if (!oldPwd) return fail('请填写旧密码');
+    if (!newPwd) return fail('请填写新密码');
+    if (newPwd.length < 6) return fail('新密码至少 6 位');
+    if (newPwd.length > 128) return fail('新密码不能超过 128 位');
+    if (newPwd === oldPwd) return fail('新密码不能与旧密码相同');
+    if (confirmPwd && newPwd !== confirmPwd) return fail('两次输入的新密码不一致');
+
+    const db = c.env.DB;
+    const user = await db.prepare('SELECT * FROM users WHERE uid = ?').bind(uid).first();
+    if (!user) return fail('用户不存在', 401);
+
+    const oldOk = await verifyPassword(oldPwd, user.password_hash);
+    if (!oldOk) return fail('旧密码不正确', 401);
+
+    const newHash = await hashPassword(newPwd);
+    const updatedAt = new Date().toISOString();
+    await db
+      .prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE uid = ?')
+      .bind(newHash, updatedAt, uid)
+      .run();
+
+    return c.json(ok({ changed: true, updatedAt }));
+  } catch (e) {
+    return fail(`[change password] ${e.name}: ${e.message}`, 500);
+  }
 });
 
 export default auth;

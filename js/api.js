@@ -121,6 +121,22 @@ export const auth = {
     }
     return res;
   },
+  /**
+   * 修改密码（必须登录）。后端支持 oldPassword/newPassword 驼峰或下划线风格，
+   * 这里传驼峰方便前端 JS 字段命名，字段两种命名都会被后端识别。
+   */
+  async changePwd({ oldPassword, newPassword, confirmPassword }) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!oldPassword) return { success: false, message: '请填写旧密码' };
+    if (!newPassword) return { success: false, message: '请填写新密码' };
+    if (newPassword.length < 6) return { success: false, message: '新密码至少 6 位' };
+    if (newPassword === oldPassword) return { success: false, message: '新密码不能与旧密码相同' };
+    if (confirmPassword !== undefined && confirmPassword !== newPassword) return { success: false, message: '两次输入的新密码不一致' };
+    return request('/api/auth/me', {
+      method: 'PATCH',
+      body: { oldPassword, newPassword, confirmPassword },
+    });
+  },
   logout() { clearAuth(); },
 };
 

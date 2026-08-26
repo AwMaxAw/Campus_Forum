@@ -617,7 +617,8 @@ async function renderMe(app) {
       <div class="tab-bar">
         <button id="tabMine" class="on" onclick="switchMeTab('mine')">📝 我发的帖</button>
         <button id="tabLikes" onclick="switchMeTab('likes')">♥ 点赞过</button>
-        <button id="tabFav" onclick="switchMeTab('favorites')">★ 我的收藏</button>
+        <button id="tabFavorites" onclick="switchMeTab('favorites')">★ 我的收藏</button>
+        <button id="tabPassword" onclick="switchMeTab('password')">🔐 修改密码</button>
       </div>
       <button class="secondary" onclick="location.hash='post'">+ 发新帖</button>
     </div>
@@ -628,9 +629,10 @@ async function renderMe(app) {
 }
 
 window.switchMeTab = function switchMeTab(tab) {
-  ['mine', 'likes', 'favorites'].forEach(t => {
-    document.getElementById('tab' + (t === 'mine' ? 'Mine' : t[0].toUpperCase() + t.slice(1)))
-      .classList.toggle('on', t === tab);
+  // 4 个 tab：mine / likes / favorites / password
+  const tabIdMap = { mine: 'tabMine', likes: 'tabLikes', favorites: 'tabFavorites', password: 'tabPassword' };
+  Object.keys(tabIdMap).forEach(t => {
+    document.getElementById(tabIdMap[t]).classList.toggle('on', t === tab);
   });
   window._currentMeTab = tab;
   loadMeTab(tab);
@@ -638,6 +640,32 @@ window.switchMeTab = function switchMeTab(tab) {
 async function loadMeTab(tab) {
   const host = document.getElementById('meContent');
   if (!host) return;
+
+  // --- 修改密码：独立表单 ---
+  if (tab === 'password') {
+    host.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">🔐 修改登录密码</h3>
+        <p class="hint" style="margin-top:-4px">
+          修改成功后会立即退出登录，需要用 <b>新密码</b> 重新登录（强制保证 localStorage 中的 token 不会"偷偷"继续用旧密码对应的身份）。
+        </p>
+        <input type="password" id="oldPwdInput" placeholder="当前旧密码（必填）" autocomplete="current-password">
+        <input type="password" id="newPwdInput" placeholder="新密码（6 位以上）" autocomplete="new-password">
+        <input type="password" id="confirmPwdInput" placeholder="再次输入新密码（必须一致）" autocomplete="new-password">
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+          <button id="changePwdBtn" onclick="doChangePwd()">确认修改密码</button>
+          <span class="hint">💡 建议：字母 + 数字组合，至少 8 位，不要跟其他网站共用密码</span>
+        </div>
+        <p id="pwdMsg" class="hint" style="margin-top:10px"></p>
+      </div>
+    `;
+    document.getElementById('confirmPwdInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doChangePwd();
+    });
+    return;
+  }
+
+  // --- 其它 3 个 tab：帖子列表 ---
   host.innerHTML = `<div class="empty">🔄 加载中...</div>`;
   try {
     let res;
@@ -660,6 +688,34 @@ async function loadMeTab(tab) {
     host.innerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
 }
+window.doChangePwd = async function doChangePwd() {
+  const btn = document.getElementById('changePwdBtn');
+  const msg = document.getElementById('pwdMsg');
+  const oldPw = document.getElementById('oldPwdInput').value;
+  const newPw = document.getElementById('newPwdInput').value;
+  const confirmPw = document.getElementById('confirmPwdInput').value;
+  if (!btn || !msg) return;
+  btn.disabled = true; btn.textContent = '提交中...';
+  msg.textContent = '';
+  msg.style.color = '';
+  try {
+    const r = await api.auth.changePwd({ oldPassword: oldPw, newPassword: newPw, confirmPassword: confirmPw });
+    if (r.success) {
+      msg.style.color = '#059669';
+      msg.textContent = '✅ 修改成功！为了安全，1 秒后会自动退出登录，请用新密码重新登录～';
+      setTimeout(() => {
+        api.auth.logout();
+        renderTopBar();
+        location.hash = 'login';
+      }, 1100);
+    } else {
+      msg.style.color = '#dc2626';
+      msg.textContent = '❌ ' + (r.message || '修改失败');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '确认修改密码'; }
+  }
+};
 
 // ==================== 视图：私信（会话列表 + 对话窗） ====================
 async function renderMessages(app) {
