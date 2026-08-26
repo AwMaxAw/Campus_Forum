@@ -1,0 +1,73 @@
+{
+  "project": "Campus_Forum (五中校园论坛)",
+  "database": "Cloudflare D1 campus-forum",
+  "exported_at_utc": "2026-08-26T13:46:21.430Z",
+  "exported_at_cst": "2026-08-26T21:46:21.430+08:00",
+  "backup_label": "20260826-214621",
+  "schema_source": "worker/src/db/schema.sql",
+  "note": "posts.author_uid ↔ users.uid 关联；users.password_hash 为 pbkdf2_sha256 不可逆哈希。删除旧帖子前的完整快照，详见 commit message。",
+  "table": "posts",
+  "row_count": 3,
+  "columns_order": [
+    "id",
+    "author_uid",
+    "title",
+    "content",
+    "tags",
+    "category",
+    "view_count",
+    "like_count",
+    "comment_count",
+    "is_pinned",
+    "is_hidden",
+    "created_at",
+    "updated_at"
+  ],
+  "rows": [
+    {
+      "id": 1,
+      "author_uid": "00000000",
+      "title": "欢迎来到五中校园论坛",
+      "content": "这是五中校园论坛的第一条帖子。当前阶段：✅ Cloudflare D1 数据库已建好，Worker 最小骨架部署成功。\\n\\n下一步：接入账号体系（注册/登录/JWT认证），让前端真的能发帖。",
+      "tags": null,
+      "category": "meta",
+      "view_count": 8,
+      "like_count": 1,
+      "comment_count": 2,
+      "is_pinned": 1,
+      "is_hidden": 0,
+      "created_at": "2026-08-26 09:51:28",
+      "updated_at": "2026-08-26 09:51:28"
+    },
+    {
+      "id": 2,
+      "author_uid": "00000000",
+      "title": "关于使用建议",
+      "content": "请文明发言，遵守校规。本论坛仅限五中师生使用，发帖请勿包含真实姓名、电话等隐私信息。\\n\\n发现违规内容可以在帖子详情页举报，管理员会尽快处理。",
+      "tags": null,
+      "category": "meta",
+      "view_count": 2,
+      "like_count": 0,
+      "comment_count": 0,
+      "is_pinned": 1,
+      "is_hidden": 0,
+      "created_at": "2026-08-26 09:51:28",
+      "updated_at": "2026-08-26 09:51:28"
+    },
+    {
+      "id": 3,
+      "author_uid": "12345678",
+      "title": "真的写入D1啦",
+      "content": "这条是我在浏览器控制台发的",
+      "tags": "",
+      "category": "life",
+      "view_count": 4,
+      "like_count": 0,
+      "comment_count": 0,
+      "is_pinned": 0,
+      "is_hidden": 0,
+      "created_at": "2026-08-26 10:04:31",
+      "updated_at": "2026-08-26 10:04:31"
+    }
+  ]
+}

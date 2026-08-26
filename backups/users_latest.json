@@ -1,0 +1,73 @@
+{
+  "project": "Campus_Forum (五中校园论坛)",
+  "database": "Cloudflare D1 campus-forum",
+  "exported_at_utc": "2026-08-26T13:46:21.430Z",
+  "exported_at_cst": "2026-08-26T21:46:21.430+08:00",
+  "backup_label": "20260826-214621",
+  "schema_source": "worker/src/db/schema.sql",
+  "note": "posts.author_uid ↔ users.uid 关联；users.password_hash 为 pbkdf2_sha256 不可逆哈希。删除旧帖子前的完整快照，详见 commit message。",
+  "table": "users",
+  "row_count": 5,
+  "columns_order": [
+    "uid",
+    "password_hash",
+    "nickname",
+    "role",
+    "avatar_url",
+    "bio",
+    "created_at",
+    "updated_at"
+  ],
+  "rows": [
+    {
+      "uid": "00000000",
+      "password_hash": "pbkdf2_sha256$100000$3158a053b719aa5f222e95a28f4ba518$a3081536c52d1bd06b93c11f26c0ace8c4a04b88941c258eb8291c3c5a549102",
+      "nickname": "系统管理员",
+      "role": "dev_admin",
+      "avatar_url": null,
+      "bio": null,
+      "created_at": "2026-08-26 09:51:28",
+      "updated_at": "2026-08-26 13:37:11"
+    },
+    {
+      "uid": "00000001",
+      "password_hash": "pbkdf2_sha256$100000$b3b144d72778d244433905636a54e4f6$485048202c1e45264dc0f5fc9c524869136d7b2350c301a7de2a7088bedccac8",
+      "nickname": "论坛管理员",
+      "role": "dev_admin",
+      "avatar_url": null,
+      "bio": null,
+      "created_at": "2026-08-26 13:34:06",
+      "updated_at": "2026-08-26 13:36:03"
+    },
+    {
+      "uid": "12345678",
+      "password_hash": "$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+      "nickname": "用户12345678",
+      "role": "member",
+      "avatar_url": null,
+      "bio": null,
+      "created_at": "2026-08-26 10:04:30",
+      "updated_at": "2026-08-26 10:04:30"
+    },
+    {
+      "uid": "55550001",
+      "password_hash": "pbkdf2_sha256$100000$0ea506aa2950bc803be8ea22494e4165$46c4f59e4c11d23cdfec76eb176586959b81c4ba862be109ed5a640c61044c55",
+      "nickname": "55550001",
+      "role": "member",
+      "avatar_url": null,
+      "bio": null,
+      "created_at": "2026-08-26 10:30:03",
+      "updated_at": "2026-08-26 10:30:03"
+    },
+    {
+      "uid": "88880001",
+      "password_hash": "pbkdf2_sha256$100000$e8dce73f709a63838dcaf943ab86ab44$9b101cb45ed90b50f5a992f946a328d34ec00a5c072276d58ec12efde4491e36",
+      "nickname": "88880001",
+      "role": "member",
+      "avatar_url": null,
+      "bio": null,
+      "created_at": "2026-08-26 11:11:17",
+      "updated_at": "2026-08-26 11:11:17"
+    }
+  ]
+}
