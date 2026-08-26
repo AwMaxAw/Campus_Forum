@@ -1,0 +1,19 @@
+{
+  "name": "campus-forum-worker",
+  "version": "1.0.0",
+  "description": "五中校园论坛 Cloudflare Worker 后端",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": ["cloudflare", "workers", "d1", "hono", "forum"],
+  "author": "AwMaxAw",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^4.126.0"
+  },
+  "dependencies": {
+    "hono": "^4.13.5"
+  }
+}
