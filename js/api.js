@@ -9,8 +9,14 @@ const API_BASE = 'https://campus-forum.max-li-ggm.workers.dev';
 const TOKEN_KEY = 'campus_forum_token';
 const USER_KEY = 'campus_forum_user';
 
-let tokenCache = localStorage.getItem(TOKEN_KEY) || null;
-let userCache = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+let tokenCache = null;
+let userCache = null;
+try {
+  tokenCache = localStorage.getItem(TOKEN_KEY) || null;
+} catch (e) { console.warn('[auth] 读取 TOKEN_KEY 失败（可能隐私模式）：', e); }
+try {
+  userCache = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+} catch (e) { console.warn('[auth] 读取 USER_KEY 失败：', e); userCache = null; }
 
 // ============== 登录态一致性修复 ==============
 // 场景：用户之前（阶段3旧代码）登录过，或者某次 clearAuth 只清了一个，导致 userCache/tokenCache 不同步。
@@ -38,13 +44,28 @@ export function clearAuth() {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-  } catch {}
+  } catch (e) {
+    console.warn('[auth] clearAuth localStorage 清理失败：', e);
+  }
 }
 function setAuth(token, user) {
   tokenCache = token;
   userCache = user;
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    // 双保险：写完立刻读回来核对，避免无痕模式 / 隐私策略下写入假成功
+    const verifyT = localStorage.getItem(TOKEN_KEY);
+    const verifyU = localStorage.getItem(USER_KEY);
+    if (verifyT !== token || !verifyU) {
+      console.warn('[auth] ⚠️ localStorage 写入失败（可能隐私模式限制）。内存登录态已设，但刷新页面会丢登录。请允许站点存储数据 / 改用普通窗口。');
+    } else {
+      console.log('[auth] ✅ 登录态已写入 localStorage，刷新后仍有效。');
+    }
+  } catch (e) {
+    console.warn('[auth] localStorage 写入失败：', e, '\n（可能是浏览器隐私模式禁止了存储——改用普通窗口即可。）');
+    alert('⚠️ 浏览器禁止了本地存储。请改为在普通窗口（不是无痕/隐私模式）打开本网站，或允许本站点使用 Cookie/本地存储，否则刷新页面会丢失登录态。');
+  }
 }
 
 async function request(path, { method = 'GET', body, needsAuth = true } = {}) {
@@ -66,7 +87,14 @@ async function request(path, { method = 'GET', body, needsAuth = true } = {}) {
   } catch {
     data = { success: false, message: `HTTP ${res.status}: ${res.statusText}` };
   }
-  if (res.status === 401) clearAuth();
+  if (res.status === 401) {
+    // 登录、注册接口本身 401 不要清（否则会把刚刚登录成功的态清掉）
+    const isAuthEndpoint = path === '/api/auth/login' || path === '/api/auth/register';
+    if (!isAuthEndpoint) {
+      console.warn(`[auth] ⚠️ 请求 ${method} ${path} 返回 401，已自动清除登录态。原因：`, data);
+      clearAuth();
+    }
+  }
   return data;
 }
 
