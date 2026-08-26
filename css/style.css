@@ -1,0 +1,155 @@
+/* ==================== 基础重置 ==================== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ==================== 顶栏 ==================== */
+.topbar {
+  background: #fff;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e5e5e7;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+.logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: #1d1d1f;
+  font-weight: 700;
+  font-size: 18px;
+  gap: 8px;
+}
+.logo-icon { font-size: 22px; }
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ==================== 主体容器 ==================== */
+.container {
+  max-width: 720px;
+  width: 100%;
+  margin: 20px auto;
+  padding: 0 16px;
+  flex: 1;
+}
+
+/* ==================== 卡片 ==================== */
+.card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e5e7;
+  transition: box-shadow 0.2s;
+}
+.card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+}
+.card h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+.card .meta {
+  color: #86868b;
+  font-size: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.card p { color: #424245; font-size: 14px; }
+
+/* ==================== 表单元素 ==================== */
+input, textarea, button {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #d2d2d7;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input { display: block; margin-bottom: 10px; width: 100%; }
+input:focus, textarea:focus { border-color: #0071e3; }
+textarea {
+  display: block;
+  margin-bottom: 10px;
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  font-family: inherit;
+}
+button {
+  background: #0071e3;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  margin-right: 8px;
+  padding: 8px 16px;
+  font-weight: 500;
+}
+button:hover { background: #0077ed; }
+button:active { transform: scale(0.98); }
+button.secondary {
+  background: #e5e5e7;
+  color: #1d1d1f;
+}
+button.secondary:hover { background: #d8d8dc; }
+
+/* ==================== 工具类 ==================== */
+.empty {
+  text-align: center;
+  color: #86868b;
+  padding: 60px 0;
+  font-size: 14px;
+}
+.toolbar {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+a { color: #0071e3; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.hint {
+  margin-top: 8px;
+  color: #86868b;
+  font-size: 12px;
+}
+
+/* ==================== 页脚 ==================== */
+.footer {
+  text-align: center;
+  padding: 20px;
+  color: #86868b;
+  font-size: 12px;
+  border-top: 1px solid #e5e5e7;
+  background: #fff;
+}
+
+/* ==================== 响应式 ==================== */
+@media (max-width: 600px) {
+  .topbar { padding: 10px 14px; }
+  .container { padding: 0 12px; margin-top: 12px; }
+  .card { padding: 14px; }
+  .logo-text { font-size: 16px; }
+}

@@ -1,0 +1,36 @@
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# 构建产物
+dist/
+build/
+.vercel/
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# wrangler（将来接 Cloudflare 后用）
+.wrangler/
+dev.vars
+
+# 工具临时目录
+.trae-html-share-packages/
+.tmp/
+tmp/
