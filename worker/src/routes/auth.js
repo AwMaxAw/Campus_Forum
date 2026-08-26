@@ -9,6 +9,7 @@
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
 import { sign } from 'hono/jwt';
+import { createMiddleware } from 'hono/factory';
 import {
   hashPassword,
   verifyPassword,
@@ -27,6 +28,12 @@ function fail(message, status = 400) {
   return new Response(JSON.stringify({ success: false, message }), {
     status,
     headers: { 'Content-Type': 'application/json' },
+  });
+}
+function requireAuth() {
+  return createMiddleware(async (c, next) => {
+    const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+    return mw(c, next);
   });
 }
 
@@ -125,7 +132,7 @@ auth.post('/login', async (c) => {
 });
 
 // ==================== 当前用户（JWT 中间件保护） ====================
-auth.get('/me', jwt({ secret: (c) => c.env.JWT_SECRET, alg: 'HS256' }), async (c) => {
+auth.get('/me', requireAuth(), async (c) => {
   const payload = c.get('jwtPayload');
   if (!payload || !payload.sub) return fail('无效的 token', 401);
 

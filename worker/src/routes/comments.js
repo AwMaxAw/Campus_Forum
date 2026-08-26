@@ -13,6 +13,7 @@
 
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
+import { createMiddleware } from 'hono/factory';
 
 const comments = new Hono();
 
@@ -26,7 +27,10 @@ function fail(message, status = 400) {
   });
 }
 function requireAuth() {
-  return jwt({ secret: (c) => c.env.JWT_SECRET, alg: 'HS256' });
+  return createMiddleware(async (c, next) => {
+    const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+    return mw(c, next);
+  });
 }
 
 function mapCommentRow(row) {

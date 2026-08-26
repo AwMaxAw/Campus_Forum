@@ -10,6 +10,7 @@
 
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
+import { createMiddleware } from 'hono/factory';
 
 const messages = new Hono();
 
@@ -22,8 +23,20 @@ function fail(message, status = 400) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+/**
+ * 关键修复：不要直接返回 jwt({ secret: (c) => c.env.JWT_SECRET })，
+ * 因为在子路由挂载时 jwt({...}) 会"立即"执行，此时 secret 回调拿到的 c.env 上下文
+ * 可能未被正确绑定（Hono v4 子路由的闭包/作用域差异），结果就是 JWT 验证时 secret 实际上
+ * 是 undefined，导致全部 401（前端会自动 clearAuth 把登录态清掉）。
+ *
+ * 解决方案：createMiddleware 把 jwt() 的创建延迟到"请求实际到来的那一刻"，此时
+ * `c` 是真实的请求上下文，c.env.JWT_SECRET 一定有值。
+ */
 function requireAuth() {
-  return jwt({ secret: (c) => c.env.JWT_SECRET, alg: 'HS256' });
+  return createMiddleware(async (c, next) => {
+    const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+    return mw(c, next);
+  });
 }
 
 function mapMsgRow(row) {
