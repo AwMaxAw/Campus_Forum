@@ -40,19 +40,20 @@ const CATEGORY_LABEL = {
 
 // ==================== 顶栏 ====================
 async function renderTopBar() {
-  const me = api.getCurrentUser();
+  const loggedIn = api.isLoggedIn();
+  const me = loggedIn ? api.getCurrentUser() : null;
   const nav = document.getElementById('topNav');
   if (!nav) return;
 
   let unreadMsg = 0;
-  if (me) {
+  if (loggedIn) {
     try {
       const r = await api.messages.unreadCount();
       if (r.success) unreadMsg = r.data.count || 0;
     } catch {}
   }
 
-  if (me) {
+  if (loggedIn && me) {
     const roleBadge = me.role === 'dev_admin'
       ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">开发管理员</span>`
       : me.role === 'admin'
@@ -110,8 +111,9 @@ function postCard(p, opts = {}) {
 
 // ==================== 视图：首页 ====================
 async function renderHome(app) {
-  const me = api.getCurrentUser();
-  if (!me) {
+  const loggedIn = api.isLoggedIn();
+  const me = loggedIn ? api.getCurrentUser() : null;
+  if (!loggedIn || !me) {
     app.innerHTML = `
       <div class="card">
         <h3>欢迎来到五中校园论坛 👋</h3>
@@ -199,7 +201,7 @@ function renderRegister(app) {
 }
 
 function renderPost(app) {
-  if (!api.getCurrentUser()) { location.hash = 'login'; return; }
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   app.innerHTML = `
     <div class="card">
       <h3>发新帖</h3>
@@ -230,7 +232,7 @@ async function renderDetail(app, postId) {
     return;
   }
   const p = postRes.data;
-  const me = api.getCurrentUser();
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
   const catLabel = CATEGORY_LABEL[p.category] || p.category;
 
   app.innerHTML = `
@@ -341,7 +343,7 @@ async function loadAndRenderComments(postId) {
     }
   }
 
-  const me = api.getCurrentUser();
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
 
   function renderComment(c, isReply) {
     const deleted = c.isHidden;
@@ -416,8 +418,8 @@ window.deleteComment = async function deleteComment(commentId, postId) {
 
 // ==================== 视图：个人中心（我的帖 / 我点赞 / 我收藏） ====================
 async function renderMe(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   const me = api.getCurrentUser();
-  if (!me) { location.hash = 'login'; return; }
 
   const initials = (me.nickname || me.uid).slice(0, 1).toUpperCase();
   app.innerHTML = `
@@ -479,7 +481,7 @@ async function loadMeTab(tab) {
 
 // ==================== 视图：私信（会话列表 + 对话窗） ====================
 async function renderMessages(app) {
-  if (!api.getCurrentUser()) { location.hash = 'login'; return; }
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   app.innerHTML = `
     <div class="messages-layout">
       <div class="conv-list">
@@ -528,7 +530,7 @@ async function renderMessages(app) {
 window.startNewConversation = function startNewConversation() {
   const uid = (document.getElementById('newDmUid').value || '').trim();
   if (!/^\d{8}$/.test(uid)) { alert('请输入 8 位数字 UID'); return; }
-  if (uid === (api.getCurrentUser() && api.getCurrentUser().uid)) { alert('不能和自己对话'); return; }
+  if (api.isLoggedIn() && uid === api.getCurrentUser().uid) { alert('不能和自己对话'); return; }
   openConversation(uid);
 };
 function highlightConvItem(otherUid) {
@@ -546,7 +548,7 @@ window.openConversation = async function openConversation(otherUid) {
   listEl.innerHTML = `<div style="color:#86868b;text-align:center;padding:40px">🔄 加载聊天记录...</div>`;
   const r = await api.messages.withUser(otherUid);
   if (!r.success) { listEl.innerHTML = `<div style="padding:20px;color:#ff3b30">❌ ${escapeHtml(r.message)}</div>`; return; }
-  const me = api.getCurrentUser();
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
   const list = r.data || [];
   if (list.length === 0) {
     listEl.innerHTML = `<div style="color:#86868b;text-align:center;padding:40px">还没有任何消息，发第一条吧！</div>`;
@@ -613,7 +615,7 @@ async function renderAnnouncements(app) {
 
 // ==================== 登录后：未读公告逐条弹窗 ====================
 async function popupUnreadAnnouncements() {
-  if (!api.getCurrentUser()) return;
+  if (!api.isLoggedIn()) return;
   let list;
   try {
     const r = await api.announcements.unread();
@@ -756,5 +758,5 @@ window.addEventListener('load', async () => {
   // 登录后拉未读公告弹窗（异步，不阻塞渲染）
   popupUnreadAnnouncements();
   // 每 60 秒刷新一次未读消息数（顶栏红点）
-  setInterval(() => { if (api.getCurrentUser()) renderTopBar(); }, 60 * 1000);
+  setInterval(() => { if (api.isLoggedIn()) renderTopBar(); }, 60 * 1000);
 });

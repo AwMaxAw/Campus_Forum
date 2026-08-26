@@ -12,13 +12,33 @@ const USER_KEY = 'campus_forum_user';
 let tokenCache = localStorage.getItem(TOKEN_KEY) || null;
 let userCache = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
 
+// ============== 登录态一致性修复 ==============
+// 场景：用户之前（阶段3旧代码）登录过，或者某次 clearAuth 只清了一个，导致 userCache/tokenCache 不同步。
+// 不一致就强制当成未登录，避免"头像显示登录了但功能全不能用"的假象。
+function syncLoginState() {
+  if (userCache && !tokenCache) {
+    // 有用户资料缓存但没 token → 登录态不完整，清掉
+    userCache = null;
+    try { localStorage.removeItem(USER_KEY); } catch {}
+  }
+  if (tokenCache && !userCache) {
+    // 有 token 但没用户资料 → token 也一起清掉（避免不一致）
+    tokenCache = null;
+    try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  }
+}
+syncLoginState();
+
 export function getToken() { return tokenCache; }
 export function getCurrentUser() { return userCache; }
+export function isLoggedIn() { return !!(tokenCache && userCache); }
 export function clearAuth() {
   tokenCache = null;
   userCache = null;
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {}
 }
 function setAuth(token, user) {
   tokenCache = token;
