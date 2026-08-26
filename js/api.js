@@ -126,18 +126,30 @@ export const auth = {
 
 // ======================== 帖子 ========================
 export const posts = {
-  async list(page = 1, pageSize = 20, category = null) {
-    const qs = new URLSearchParams({ page, pageSize });
-    if (category) qs.set('category', category);
+  /**
+   * 列表：支持分页 + 搜索/标签/日期/排序 组合筛选
+   * filters = { q, tag, category, dateFrom, dateTo, sortBy }
+   */
+  async list(page = 1, pageSize = 20, filters = {}) {
+    const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    const f = filters || {};
+    if (f.category) qs.set('category', f.category);
+    if (f.q) qs.set('q', f.q);
+    if (f.tag) qs.set('tag', f.tag);
+    if (f.dateFrom) qs.set('date_from', f.dateFrom); // YYYY-MM-DD
+    if (f.dateTo)   qs.set('date_to', f.dateTo);
+    if (f.sortBy)   qs.set('sort_by', f.sortBy);     // 'latest' | 'hot'
     return request(`/api/posts?${qs}`, { needsAuth: false });
+  },
+  /** 热门标签榜（首页搜索条 chip 推荐用） */
+  async popularTags() {
+    return request('/api/posts/tags/popular', { needsAuth: false });
   },
   async byId(id) {
     return request(`/api/posts/${id}`, { needsAuth: false });
   },
   async mine(page = 1, pageSize = 20) {
-    // "我发的帖"：后端没单独接口，这里走列表 + 前端按 authorUid 过滤也行。
-    // 为了准确，我们直接取列表时后端没有这个端点——因此新增：/api/posts?author_uid=xxx 在后端我们没加。
-    // 简单方案：拿 100 条最新在前端过滤 authorUid === 当前用户
+    // 后端暂时没有 author_uid 筛选，拿 100 条前端过滤。如需加后端接口改 posts.list() 里的 whereParts 即可。
     const res = await request('/api/posts?pageSize=100', { needsAuth: false });
     if (res.success && userCache) {
       res.data = res.data.filter(p => p.authorUid === userCache.uid);
@@ -145,9 +157,14 @@ export const posts = {
     }
     return res;
   },
-  async create(title, content, category = 'general', tags = []) {
+  /**
+   * 发新帖：前端现在已经把"分类选择"去掉，改让用户填多标签（tags 数组）。
+   * category 字段后端会自动根据 第一个合法 tag 或 general 来填，因此这里不传 category。
+   */
+  async create(title, content, tags = []) {
     if (!tokenCache) return { success: false, message: '请先登录' };
-    return request('/api/posts', { method: 'POST', body: { title, content, category, tags } });
+    if (!Array.isArray(tags)) tags = [];
+    return request('/api/posts', { method: 'POST', body: { title, content, tags } });
   },
   async remove(id) {
     return request(`/api/posts/${id}`, { method: 'DELETE' });

@@ -83,8 +83,10 @@ async function renderTopBar() {
 function postCard(p, opts = {}) {
   const author = p.authorNickname || `用户${p.authorUid}`;
   const time = formatTime(p.createdAt);
-  const tags = (p.tags && p.tags.length)
-    ? `<div style="margin-top:6px;color:#6b7280;font-size:12px">${p.tags.map(t => `#${escapeHtml(t)}`).join(' ')}</div>`
+  const tags = (Array.isArray(p.tags) && p.tags.length)
+    ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+         ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${JSON.stringify(t)})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+       </div>`
     : '';
   const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
   const clickable = opts.allowClick ? 'clickable' : '';
@@ -109,43 +111,135 @@ function postCard(p, opts = {}) {
   `;
 }
 
-// ==================== 视图：首页 ====================
+// ==================== 首页搜索/筛选 工具函数 ====================
+// 把搜索筛选参数统一塞到 location.hash 的查询串部分（紧跟在 #home 之后，用 ? 开头）
+// 例：#home?q=数学&tag=社团招新&from=2026-08-01&to=2026-08-31&sort=hot
+function getHomeFilters() {
+  const raw = (location.hash || '').slice(1);
+  const [pathPart, queryPart] = raw.split('?');
+  const qp = new URLSearchParams(queryPart || '');
+  return {
+    q: qp.get('q') || '',
+    tag: qp.get('tag') || '',
+    dateFrom: qp.get('from') || '',
+    dateTo: qp.get('to') || '',
+    sortBy: qp.get('sort') || 'latest',
+    __path: pathPart,
+  };
+}
+function buildHomeHash(f) {
+  const qp = new URLSearchParams();
+  if (f.q) qp.set('q', f.q);
+  if (f.tag) qp.set('tag', f.tag);
+  if (f.dateFrom) qp.set('from', f.dateFrom);
+  if (f.dateTo) qp.set('to', f.dateTo);
+  if (f.sortBy && f.sortBy !== 'latest') qp.set('sort', f.sortBy);
+  const qs = qp.toString();
+  return '#home' + (qs ? `?${qs}` : '');
+}
+window.setHomeFilter = function setHomeFilter(key, value) {
+  const f = getHomeFilters();
+  if (key === 'sort') f.sortBy = value || 'latest';
+  else f[key] = value || '';
+  location.hash = buildHomeHash(f);
+  // hash 不变（比如只是清除）时不会触发 route()，手动调
+  setTimeout(route, 0);
+};
+// 帖子 chip 点一下是按 tag 搜；但如果首页没有任何查询条件且点了多个 tag chip，
+// 这里只做"单选 tag"语义（一次只筛一个标签）。
+window.clearHomeFilters = function clearHomeFilters() {
+  location.hash = '#home';
+  setTimeout(route, 0);
+};
+
+// ==================== 视图：首页（含搜索条 + 热门标签 chip）====================
 async function renderHome(app) {
+  const filters = getHomeFilters();
   const loggedIn = api.isLoggedIn();
   const me = loggedIn ? api.getCurrentUser() : null;
-  if (!loggedIn || !me) {
-    app.innerHTML = `
-      <div class="card">
-        <h3>欢迎来到五中校园论坛 👋</h3>
-        <p>这是一个由五中学生维护的校园论坛。你可以：</p>
-        <p>📌 还没有账号？<a href="#register">去注册（只要 8 位 UID + 密码）</a></p>
-        <p>🔑 已有账号？<a href="#login">直接登录</a></p>
-      </div>
-      <div class="card">
-        <h3>技术栈</h3>
-        <p>✅ 前端：Vercel 托管的纯 HTML + 原生 JS</p>
-        <p>✅ 后端：Cloudflare Worker + D1（零服务器成本）</p>
-        <p>✅ 密码：PBKDF2-HMAC-SHA-256 哈希（Web Crypto 内置，不裸存）</p>
-        <p>✅ 认证：JWT（HMAC-SHA-256，7 天有效期）</p>
-      </div>
-      <div class="card">
-        <h3>最新帖子</h3>
-        <div id="postList" class="empty">🔄 正在读取帖子...</div>
-      </div>
-    `;
-  } else {
-    app.innerHTML = `
-      <div class="toolbar">
-        <span id="postCount">读取中...</span>
-        <button onclick="location.hash='post'">+ 发新帖</button>
-      </div>
-      <div id="postList" class="empty">🔄 正在读取帖子...</div>
-    `;
-  }
 
+  const topBanner = !loggedIn
+    ? `<div class="card">
+         <h3>欢迎来到五中校园论坛 👋</h3>
+         <p>这是一个由五中学生维护的校园论坛。你可以：</p>
+         <p>📌 还没有账号？<a href="#register">去注册（只要 8 位 UID + 密码）</a></p>
+         <p>🔑 已有账号？<a href="#login">直接登录</a></p>
+       </div>
+       <div class="card">
+         <h3>技术栈</h3>
+         <p>✅ 前端：Vercel 托管的纯 HTML + 原生 JS</p>
+         <p>✅ 后端：Cloudflare Worker + D1（零服务器成本）</p>
+         <p>✅ 密码：PBKDF2-HMAC-SHA-256 哈希（Web Crypto 内置，不裸存）</p>
+         <p>✅ 认证：JWT（HMAC-SHA-256，7 天有效期）</p>
+       </div>`
+    : `<div class="toolbar">
+         <span id="postCount">读取中...</span>
+         <button onclick="location.hash='post'">+ 发新帖</button>
+       </div>`;
+
+  app.innerHTML = `
+    ${topBanner}
+    <!-- 搜索条（所有访客都看得到） -->
+    <div class="card search-panel">
+      <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索帖子</h3>
+      <div class="search-row">
+        <input id="sqInput" placeholder="关键字（搜标题/正文，如：数学、社团招新）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+        <input id="stagInput" placeholder="按标签筛选（如：高二、羽毛球）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+      </div>
+      <div class="search-row">
+        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+          从 <input type="date" id="sFrom" value="${escapeHtml(filters.dateFrom)}">
+        </label>
+        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+          到 <input type="date" id="sTo" value="${escapeHtml(filters.dateTo)}">
+        </label>
+        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+          排序
+          <select id="sSort" style="padding:4px 6px;border-radius:6px;border:1px solid #d2d2d7">
+            <option value="latest" ${filters.sortBy==='latest'?'selected':''}>最新</option>
+            <option value="hot"    ${filters.sortBy==='hot'   ?'selected':''}>最热（点赞×3 + 评论×2 + 浏览）</option>
+          </select>
+        </label>
+      </div>
+      <div class="search-row" style="margin-top:6px">
+        <button onclick="homeRunSearch()">🔎 搜索</button>
+        <button class="secondary" onclick="clearHomeFilters()">🗑 清除条件</button>
+        <span id="filterBadges" style="flex:1;display:flex;flex-wrap:wrap;gap:4px;align-items:center"></span>
+      </div>
+      <div id="popularTags" style="margin-top:10px">🔄 正在读取热门标签…</div>
+    </div>
+
+    <div class="card">
+      <h3 id="listTitle" style="margin-top:0;margin-bottom:10px">最新帖子</h3>
+      <div id="postList" class="empty">🔄 正在读取帖子...</div>
+    </div>
+  `;
+
+  // --- 1) 读取热门标签 chip ---
+  (async () => {
+    const box = document.getElementById('popularTags');
+    const resp = await api.posts.popularTags();
+    if (!resp.success) { box.outerHTML = ''; return; }
+    const tags = (resp.data && resp.data.tags) || [];
+    if (tags.length === 0) { box.outerHTML = ''; return; }
+    box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 最近 30 天热门标签（点一下直接按该标签筛选）：</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${tags.map(t =>
+        `<span class="tag-chip ${filters.tag===t.tag?'active-tag':''}" onclick="setHomeFilter('tag',${JSON.stringify(t.tag)})" title="该标签出现 ${t.count} 次">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
+      ).join('')}</div>`;
+  })().catch(() => { /* 热门标签读取失败不用影响主流程 */ });
+
+  // --- 2) 读帖子列表（带筛选） ---
   const listEl = document.getElementById('postList');
+  const listTitleEl = document.getElementById('listTitle');
   try {
-    const res = await api.posts.list();
+    const postFilters = {
+      q: filters.q || undefined,
+      tag: filters.tag || undefined,
+      dateFrom: filters.dateFrom || undefined,
+      dateTo: filters.dateTo || undefined,
+      sortBy: filters.sortBy,
+    };
+    const res = await api.posts.list(1, 50, postFilters);
     if (!res.success) {
       listEl.outerHTML = `<div class="card">❌ 加载失败：${escapeHtml(res.message)}</div>`;
       return;
@@ -154,8 +248,25 @@ async function renderHome(app) {
     const total = (res.pagination || {}).total || 0;
     const countEl = document.getElementById('postCount');
     if (countEl) countEl.textContent = `共 ${total} 条帖子`;
+
+    // 列表标题：有筛选条件就显示"搜索结果 N 条"
+    const applied = (res.appliedFilters || {});
+    const hasFilter = applied.q || applied.tag || applied.dateFrom || applied.dateTo;
+    if (listTitleEl) listTitleEl.textContent = hasFilter ? `搜索结果（${total} 条）` : (applied.sortBy==='hot' ? '🔥 最热帖子' : '最新帖子');
+
+    // 条件徽章（q/tag/日期区间，点 × 清掉单个）
+    const badgeBox = document.getElementById('filterBadges');
+    if (badgeBox) {
+      const badges = [];
+      if (applied.q) badges.push(`<span class="filter-badge">关键字：<b>${escapeHtml(applied.q)}</b><button class="chip-close" onclick="setHomeFilter('q','')">×</button></span>`);
+      if (applied.tag) badges.push(`<span class="filter-badge">标签：<b>#${escapeHtml(applied.tag)}</b><button class="chip-close" onclick="setHomeFilter('tag','')">×</button></span>`);
+      if (applied.dateFrom) badges.push(`<span class="filter-badge">从 <b>${escapeHtml(applied.dateFrom)}</b><button class="chip-close" onclick="setHomeFilter('dateFrom','')">×</button></span>`);
+      if (applied.dateTo) badges.push(`<span class="filter-badge">到 <b>${escapeHtml(applied.dateTo)}</b><button class="chip-close" onclick="setHomeFilter('dateTo','')">×</button></span>`);
+      badgeBox.innerHTML = badges.join('');
+    }
+
     if (data.length === 0) {
-      listEl.outerHTML = `<div class="empty">还没有帖子，快来发第一条吧</div>`;
+      listEl.outerHTML = `<div class="empty">${hasFilter ? '😶 没有匹配的帖子，试试 🔎 清除条件 重新搜索～' : '还没有帖子，快来发第一条吧'}</div>`;
       return;
     }
     listEl.outerHTML = data.map(p => postCard(p, { allowClick: true })).join('');
@@ -163,6 +274,21 @@ async function renderHome(app) {
     listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
 }
+window.homeRunSearch = function homeRunSearch() {
+  const sq = document.getElementById('sqInput');
+  const stag = document.getElementById('stagInput');
+  const sFrom = document.getElementById('sFrom');
+  const sTo = document.getElementById('sTo');
+  const sSort = document.getElementById('sSort');
+  const f = getHomeFilters();
+  f.q = (sq && sq.value || '').trim();
+  f.tag = (stag && stag.value || '').trim().replace(/^#/, '');
+  f.dateFrom = (sFrom && sFrom.value || '');
+  f.dateTo = (sTo && sTo.value || '');
+  f.sortBy = (sSort && sSort.value) || 'latest';
+  location.hash = buildHomeHash(f);
+  setTimeout(route, 0);
+};
 
 // ==================== 视图：登录 / 注册 / 发帖 ====================
 function renderLogin(app) {
@@ -200,27 +326,83 @@ function renderRegister(app) {
   document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
 }
 
+// 发帖标签：前端内部状态（renderPost 渲染 chip 用，doPost 时读它）
+let draftPostTags = [];
+
 function renderPost(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  draftPostTags = []; // 每次进发新帖页都清空
+
   app.innerHTML = `
     <div class="card">
       <h3>发新帖</h3>
       <input id="titleInput" placeholder="标题（必填，100字内）" maxlength="100">
       <textarea id="contentInput" placeholder="说点什么...（必填，2000字内）" maxlength="2000"></textarea>
-      <div style="margin-bottom:10px">
-        <label for="catInput" style="font-size:13px;color:#424245">分区：</label>
-        <select id="catInput" style="padding:6px 8px;border-radius:6px;border:1px solid #d2d2d7">
-          <option value="general">综合</option>
-          <option value="study">学习</option>
-          <option value="club">社团</option>
-          <option value="life">生活</option>
-          <option value="meta">站务</option>
-        </select>
+
+      <div style="margin-bottom:14px">
+        <label for="tagInput" style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
+          🏷 标签（最多 5 个，每个 ≤20 字，回车/逗号/空格确认一个）
+        </label>
+        <div id="tagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+        <input id="tagInput"
+               placeholder="例：高二 / 数学 / 社团招新 / 英语演讲比赛 ……"
+               maxlength="20"
+               style="width:100%">
+        <p class="hint" style="margin:2px 0 0 0">
+          💡 小技巧：<b>回车 / 逗号 / 空格 / 中文顿号</b> 都能立刻确认一个标签；chip 右
+          上角的 × 可以删除。标签也用于以后搜索归类（帖子不再手动选"分区"，系统自动根据第一个标签推断）。
+        </p>
       </div>
+
       <button id="postBtn" onclick="doPost()">发布</button>
       <button class="secondary" onclick="location.hash='home'">取消</button>
     </div>
   `;
+
+  // --- 多标签 chip 逻辑 ---
+  const tagInput = document.getElementById('tagInput');
+  const chipsBox = document.getElementById('tagChips');
+  function renderChips() {
+    chipsBox.innerHTML = draftPostTags.map((t, i) =>
+      `<span class="tag-chip input-chip">#${escapeHtml(t)}<button class="chip-close" data-idx="${i}" aria-label="删除该标签">×</button></span>`
+    ).join('');
+    chipsBox.querySelectorAll('.chip-close').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        draftPostTags.splice(idx, 1);
+        renderChips();
+      });
+    });
+  }
+  function addTagFromInput() {
+    const raw = (tagInput.value || '').trim().replace(/^#/, '');
+    // 中文逗号 / 空格 / 顿号 / 英文逗号 / 分号 —— 全部当作分隔符
+    const items = raw.split(/[,，;；、\s\t]+/).map(s => s.trim()).filter(Boolean);
+    if (items.length === 0) return false;
+    for (const it of items) {
+      const t = it.slice(0, 20);
+      if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
+    }
+    tagInput.value = '';
+    renderChips();
+    return true;
+  }
+  // 回车 / 逗号 / 顿号 / 中文逗号 / 空格 立即确认
+  tagInput.addEventListener('keydown', e => {
+    if (['Enter', ',', '，', ';', '；', '、', ' '].includes(e.key)) {
+      e.preventDefault();
+      addTagFromInput();
+    } else if (e.key === 'Backspace' && tagInput.value === '' && draftPostTags.length > 0) {
+      draftPostTags.pop();
+      renderChips();
+    }
+  });
+  // 失焦 / 粘贴也确认
+  tagInput.addEventListener('blur', () => addTagFromInput());
+  tagInput.addEventListener('paste', e => {
+    setTimeout(addTagFromInput, 0);
+  });
+  renderChips();
 }
 
 // ==================== 视图：帖子详情 + 评论区 + 楼中楼 + 点赞/收藏 ====================
@@ -717,12 +899,24 @@ window.doLogout = function doLogout() {
 window.doPost = async function doPost() {
   const title = document.getElementById('titleInput').value.trim();
   const content = document.getElementById('contentInput').value.trim();
-  const category = document.getElementById('catInput').value;
+  // 输入框可能没失焦/没按回车，最后一次尝试把输入框里残留的文本当标签吸收
+  const tagInput = document.getElementById('tagInput');
+  if (tagInput) {
+    try {
+      const raw = (tagInput.value || '').trim().replace(/^#/, '');
+      const items = raw.split(/[,，;；、\s\t]+/).map(s => s.trim()).filter(Boolean);
+      for (const it of items) {
+        const t = it.slice(0, 20);
+        if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
+      }
+    } catch {}
+  }
   if (!title || !content) return alert('标题和内容不能为空');
+  const tags = [...draftPostTags]; // 拷贝一份，防止发布中用户还在改 chip
   const btn = document.getElementById('postBtn');
   btn.disabled = true; btn.textContent = '发布中...';
   try {
-    const r = await api.posts.create(title, content, category);
+    const r = await api.posts.create(title, content, tags);
     if (r.success) location.hash = 'home';
     else alert(r.message || '发布失败');
   } finally {

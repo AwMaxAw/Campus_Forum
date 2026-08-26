@@ -1,10 +1,11 @@
 /**
  * 帖子相关路由
  *
- * GET    /api/posts              列表（分页、分区过滤）
- * GET    /api/posts/:id          帖子详情（view_count += 1，附带作者信息）
- * POST   /api/posts              发新帖（JWT）
- * DELETE /api/posts/:id          删帖（JWT，作者本人 或 admin）
+ * GET    /api/posts              列表（分页、分类、关键字搜索、标签、日期区间）
+ * GET    /api/posts/tags/popular 热门标签榜（用于首页搜索条推荐）
+ * GET    /api/posts/:id          帖子详情（view_count += 1，附带作者信息 + 当前用户点赞/收藏）
+ * POST   /api/posts              发新帖（JWT，支持多标签 tags 数组，不传 category 则默认 general）
+ * DELETE /api/posts/:id          删帖（JWT，作者本人 或 admin/dev_admin）
  */
 
 import { Hono } from 'hono';
@@ -29,6 +30,12 @@ function requireAuth() {
   });
 }
 
+// 目前 tags 在 DB 里存的是逗号分隔字符串（a,b,c），前后端都按数组来用
+function parseTags(str) {
+  if (!str) return [];
+  return String(str).split(',').map(t => t.trim()).filter(Boolean);
+}
+
 function mapPostRow(row) {
   if (!row) return null;
   return {
@@ -39,7 +46,7 @@ function mapPostRow(row) {
     authorNickname: row.author_nickname || null,
     authorRole: row.author_role || null,
     category: row.category,
-    tags: row.tags ? row.tags.split(',') : [],
+    tags: parseTags(row.tags),
     viewCount: row.view_count,
     likeCount: row.like_count,
     commentCount: row.comment_count,
@@ -53,44 +60,110 @@ function mapPostRow(row) {
   };
 }
 
-// ==================== 列表（公开）====================
+// ==================== 列表（公开，支持搜索 / 标签 / 日期 / 分类 混合筛选）====================
 posts.get('/', async (c) => {
-  const { searchParams } = new URL(c.req.url);
-  const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-  const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)));
-  const category = searchParams.get('category');
-  const offset = (page - 1) * pageSize;
+  try {
+    const { searchParams } = new URL(c.req.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)));
+    const category = searchParams.get('category');
+    const q = (searchParams.get('q') || '').trim();         // 关键字：搜 title + content
+    const tag = (searchParams.get('tag') || '').trim();     // 单标签：匹配是否包含在 tags 逗号串里
+    const dateFrom = (searchParams.get('date_from') || '').trim(); // YYYY-MM-DD
+    const dateTo = (searchParams.get('date_to') || '').trim();     // YYYY-MM-DD
+    const sortBy = searchParams.get('sort_by') || 'latest'; // latest | hot
+    const offset = (page - 1) * pageSize;
 
-  const db = c.env.DB;
-  const whereParts = ['p.is_hidden = 0'];
-  const params = [];
-  if (category) {
-    whereParts.push('p.category = ?');
-    params.push(category);
+    const db = c.env.DB;
+    const whereParts = ['p.is_hidden = 0'];
+    const params = [];
+
+    if (category) {
+      whereParts.push('p.category = ?');
+      params.push(category);
+    }
+    if (q) {
+      whereParts.push('(p.title LIKE ? OR p.content LIKE ?)');
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (tag) {
+      // 首尾补逗号后匹配，避免"数学"误包含进"高等数学"里的子串
+      whereParts.push("(',' || p.tags || ',') LIKE ?");
+      params.push(`%,${tag},%`);
+    }
+    if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+      whereParts.push('DATE(p.created_at) >= DATE(?)');
+      params.push(dateFrom);
+    }
+    if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+      whereParts.push('DATE(p.created_at) <= DATE(?)');
+      params.push(dateTo);
+    }
+    const whereSQL = whereParts.join(' AND ');
+
+    const countResult = await db
+      .prepare(`SELECT COUNT(*) AS c FROM posts p WHERE ${whereSQL}`)
+      .bind(...params)
+      .first();
+    const total = countResult.c;
+
+    const orderSQL = sortBy === 'hot'
+      ? 'p.is_pinned DESC, (p.like_count * 3 + p.comment_count * 2 + p.view_count) DESC, p.created_at DESC'
+      : 'p.is_pinned DESC, p.created_at DESC';
+
+    const rows = await db
+      .prepare(
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
+         FROM posts p
+         LEFT JOIN users u ON u.uid = p.author_uid
+         WHERE ${whereSQL}
+         ORDER BY ${orderSQL}
+         LIMIT ? OFFSET ?`
+      )
+      .bind(...params, pageSize, offset)
+      .all();
+
+    return c.json(ok(rows.results.map(mapPostRow), {
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) || 1 },
+      appliedFilters: { category: category || null, q: q || null, tag: tag || null, dateFrom: dateFrom || null, dateTo: dateTo || null, sortBy },
+    }));
+  } catch (e) {
+    return fail(`[posts list] ${e.name}: ${e.message}`, 500);
   }
-  const whereSQL = whereParts.join(' AND ');
+});
 
-  const countResult = await db
-    .prepare(`SELECT COUNT(*) AS c FROM posts p WHERE ${whereSQL}`)
-    .bind(...params)
-    .first();
-  const total = countResult.c;
+// ==================== 热门标签榜（用于首页搜索条 chip 推荐）====================
+posts.get('/tags/popular', async (c) => {
+  try {
+    const db = c.env.DB;
+    // 只统计最近 30 天内没被隐藏的帖子，取 TOP 30 标签
+    const rows = await db
+      .prepare(
+        `SELECT p.tags
+         FROM posts p
+         WHERE p.is_hidden = 0 AND p.tags IS NOT NULL AND p.tags <> ''
+           AND DATE(p.created_at) >= DATE('now', '-30 day')
+         ORDER BY p.created_at DESC
+         LIMIT 1000`
+      )
+      .all();
+    const counter = new Map();
+    for (const r of rows.results || []) {
+      for (const t of parseTags(r.tags)) {
+        const key = t.slice(0, 20); // 限制单个 tag 长度
+        if (!key) continue;
+        counter.set(key, (counter.get(key) || 0) + 1);
+      }
+    }
+    const top = [...counter.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 30)
+      .map(([tag, count]) => ({ tag, count }));
 
-  const rows = await db
-    .prepare(
-      `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
-       FROM posts p
-       LEFT JOIN users u ON u.uid = p.author_uid
-       WHERE ${whereSQL}
-       ORDER BY p.is_pinned DESC, p.created_at DESC
-       LIMIT ? OFFSET ?`
-    )
-    .bind(...params, pageSize, offset)
-    .all();
-
-  return c.json(ok(rows.results.map(mapPostRow), {
-    pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
-  }));
+    return c.json(ok({ tags: top }));
+  } catch (e) {
+    return fail(`[tags popular] ${e.name}: ${e.message}`, 500);
+  }
 });
 
 // ==================== 详情（公开，附带当前用户是否点赞/收藏）====================
@@ -145,46 +218,75 @@ posts.get('/:id', async (c) => {
 
 // ==================== 发新帖（JWT）====================
 posts.post('/', requireAuth(), async (c) => {
-  const payload = c.get('jwtPayload');
-  const uid = payload && payload.sub;
-  if (!uid) return fail('需要登录', 401);
+  try {
+    const payload = c.get('jwtPayload');
+    const uid = payload && payload.sub;
+    if (!uid) return fail('需要登录', 401);
 
-  const db = c.env.DB;
-  const author = await db
-    .prepare('SELECT uid, role FROM users WHERE uid = ?')
-    .bind(uid)
-    .first();
-  if (!author) return fail('用户不存在', 401);
+    const db = c.env.DB;
+    const author = await db
+      .prepare('SELECT uid, role FROM users WHERE uid = ?')
+      .bind(uid)
+      .first();
+    if (!author) return fail('用户不存在', 401);
 
-  let body;
-  try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
-  const title = (body.title || '').trim();
-  const content = (body.content || '').trim();
-  const category = (body.category || 'general').trim();
-  const tags = Array.isArray(body.tags) ? body.tags.slice(0, 5).join(',') : '';
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+    const title = (body.title || '').trim();
+    const content = (body.content || '').trim();
 
-  if (!title) return fail('标题不能为空');
-  if (!content) return fail('内容不能为空');
-  if (title.length > 100) return fail('标题不能超过 100 字');
-  if (content.length > 2000) return fail('内容不能超过 2000 字');
-  const allowedCategories = ['general', 'study', 'club', 'life', 'meta'];
-  if (!allowedCategories.includes(category)) return fail(`分区必须是 ${allowedCategories.join('/')}`);
+    // --- 标签化改造：category 字段不再让用户主动选 ---
+    // 优先级：如果前端显式传了合法 category 就用；否则从 tags 里挑第一个非空当 category；
+    // 还是没有 → 默认 'general'
+    let category = (body.category || '').trim();
+    const allowedCategories = ['general', 'study', 'club', 'life', 'meta'];
 
-  const result = await db
-    .prepare(`INSERT INTO posts (author_uid, title, content, category, tags) VALUES (?, ?, ?, ?, ?)`)
-    .bind(uid, title, content, category, tags)
-    .run();
+    // tags：接受 Array<string> 或 "a,b,c" 字符串（方便 curl 测试）；去重 + 最多 5 个；每个 ≤20 字
+    const rawTags = Array.isArray(body.tags)
+      ? body.tags
+      : (typeof body.tags === 'string' ? body.tags.split(/[,，\s]+/) : []);
+    const cleanTags = [...new Set(
+      rawTags.map(t => String(t).trim()).filter(Boolean).map(t => t.slice(0, 20))
+    )].slice(0, 5);
+    const tagsStr = cleanTags.join(',');
 
-  const postId = result.meta.last_row_id;
-  const created = await db
-    .prepare(
-      `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
-       FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
-    )
-    .bind(postId)
-    .first();
+    // 前端没有传 category 的情况下，用第一个标签近似分类；仍旧不合法 → general
+    if (!allowedCategories.includes(category)) {
+      const picked = cleanTags[0] && cleanTags[0].toLowerCase();
+      if (picked && allowedCategories.includes(picked)) {
+        category = picked;
+      } else {
+        category = 'general';
+      }
+    }
 
-  return c.json(ok(mapPostRow(created)), 201);
+    if (!title) return fail('标题不能为空');
+    if (!content) return fail('内容不能为空');
+    if (title.length > 100) return fail('标题不能超过 100 字');
+    if (content.length > 2000) return fail('内容不能超过 2000 字');
+    if (cleanTags.some(t => /["'\\<>{}]/.test(t))) return fail('标签不能包含特殊字符');
+
+    const result = await db
+      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags) VALUES (?, ?, ?, ?, ?)`)
+      .bind(uid, title, content, category, tagsStr)
+      .run();
+
+    const postId = result && result.meta && typeof result.meta.last_row_id === 'number'
+      ? result.meta.last_row_id : null;
+    if (!postId) return fail('帖子创建失败（DB 返回空 id）', 500);
+
+    const created = await db
+      .prepare(
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
+         FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
+      )
+      .bind(postId)
+      .first();
+
+    return c.json(ok(mapPostRow(created)), 201);
+  } catch (e) {
+    return fail(`[posts create] ${e.name}: ${e.message}`, 500);
+  }
 });
 
 // ==================== 删帖（JWT：作者本人 或 admin/dev_admin）====================
