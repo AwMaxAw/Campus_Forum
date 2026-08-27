@@ -2,7 +2,8 @@
  * 五中校园论坛 - 前端主逻辑
  *
  * 路由（hash 路由，location.hash 变更触发 route()）：
- *   #home                首页 - 帖子列表（已登录/未登录都能看）
+ *   #home                封面页（欢迎页 + 动画占位，未登录也能看）
+ *   #forum               广场 - 帖子列表（需登录）
  *   #login               登录
  *   #register            注册
  *   #post                发新帖（需登录）
@@ -88,8 +89,9 @@ async function renderTopBar() {
         : '';
     nav.innerHTML = `
       <button class="ghost" onclick="location.hash='home'">🏠 首页</button>
+      <button class="ghost" onclick="location.hash='forum'">📢 广场</button>
       <button class="ghost" onclick="location.hash='me'">👤 我的</button>
-      <button class="ghost" onclick="location.hash='announcements'">📢 公告</button>
+      <button class="ghost" onclick="location.hash='announcements'">📋 公告</button>
       <button class="ghost" onclick="location.hash='messages'">
         💬 私信${unreadMsg ? `<span class="unread-badge">${unreadMsg}</span>` : ''}
       </button>
@@ -137,9 +139,9 @@ function postCard(p, opts = {}) {
   `;
 }
 
-// ==================== 首页搜索/筛选 工具函数 ====================
-// 把搜索筛选参数统一塞到 location.hash 的查询串部分（紧跟在 #home 之后，用 ? 开头）
-// 例：#home?q=数学&tag=社团招新&from=2026-08-01&to=2026-08-31&sort=hot
+// ==================== 广场页搜索/筛选 工具函数 ====================
+// 把搜索筛选参数统一塞到 location.hash 的查询串部分（紧跟在 #forum 之后，用 ? 开头）
+// 例：#forum?q=数学&tag=社团招新&from=2026-08-01&to=2026-08-31&sort=hot
 function getHomeFilters() {
   const raw = (location.hash || '').slice(1);
   const [pathPart, queryPart] = raw.split('?');
@@ -163,7 +165,7 @@ function buildHomeHash(f) {
   if (f.dateTo) qp.set('to', f.dateTo);
   if (f.sortBy && f.sortBy !== 'latest') qp.set('sort', f.sortBy);
   const qs = qp.toString();
-  return '#home' + (qs ? `?${qs}` : '');
+  return '#forum' + (qs ? `?${qs}` : '');
 }
 window.setHomeFilter = function setHomeFilter(key, value) {
   const f = getHomeFilters();
@@ -176,25 +178,41 @@ window.setHomeFilter = function setHomeFilter(key, value) {
 // 帖子 chip 点一下是按 tag 搜；但如果首页没有任何查询条件且点了多个 tag chip，
 // 这里只做"单选 tag"语义（一次只筛一个标签）。
 window.clearHomeFilters = function clearHomeFilters() {
-  location.hash = '#home';
+  location.hash = '#forum';
   setTimeout(route, 0);
 };
 
-// ==================== 视图：首页（含分区 Tab + 搜索条 + 热门标签 chip）====================
-async function renderHome(app) {
+// ==================== 视图：封面页（首页 #home，未登录也能看）====================
+function renderCover(app) {
+  const loggedIn = api.isLoggedIn();
+  app.innerHTML = `
+    <div class="cover-hero" style="text-align:center;padding:48px 20px 36px">
+      <h1 style="font-size:28px;margin-bottom:12px">五中校园论坛</h1>
+      <p style="font-size:15px;color:#6e6e73;margin-bottom:24px">属于五中人的交流空间</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        ${loggedIn
+          ? `<button onclick="location.hash='forum'" style="padding:10px 28px;font-size:15px">进入广场 →</button>`
+          : `<button onclick="location.hash='login'" style="padding:10px 28px;font-size:15px">登录</button>
+             <button class="secondary" onclick="location.hash='register'" style="padding:10px 28px;font-size:15px">注册</button>`
+        }
+      </div>
+    </div>
+    <!-- 动画占位区：后续放首页动画效果 -->
+    <div id="coverAnimation" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:#c4c4c8;font-size:14px">
+      🎬 动画效果开发中…
+    </div>
+  `;
+}
+
+// ==================== 视图：广场（帖子列表 + 分区Tab + 搜索条 + 热门标签，需登录）====================
+async function renderForum(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   const filters = getHomeFilters();
   const loggedIn = api.isLoggedIn();
   const me = loggedIn ? api.getCurrentUser() : null;
   const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
 
-  const topBanner = !loggedIn
-    ? `<div class="card">
-         <h3>欢迎来到五中校园论坛 👋</h3>
-         <p>这是一个由五中学生维护的校园论坛。你可以：</p>
-         <p>📌 还没有账号？<a href="#register">去注册（只要 8 位 UID + 密码）</a></p>
-         <p>🔑 已有账号？<a href="#login">直接登录</a></p>
-       </div>`
-    : `<div class="toolbar">
+  const topBanner = `<div class="toolbar">
          <span id="postCount">读取中...</span>
          <button onclick="location.hash='post'">+ 发新帖</button>
        </div>`;
@@ -427,7 +445,7 @@ function renderPost(app) {
       ` : ''}
 
       <button id="postBtn" onclick="doPost()">发布</button>
-      <button class="secondary" onclick="location.hash='home'">取消</button>
+      <button class="secondary" onclick="location.hash='forum'">取消</button>
     </div>
   `;
 
@@ -527,13 +545,13 @@ async function renderDetail(app, postId) {
   const catBadge = categoryBadgeHtml(p.category);
   const tagsHtml = (Array.isArray(p.tags) && p.tags.length)
     ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
-         ${p.tags.map(t => `<span class="tag-chip" onclick="location.hash='home';setTimeout(()=>setHomeFilter('tag',${escapeHtml(JSON.stringify(t))}),0)" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+         ${p.tags.map(t => `<span class="tag-chip" onclick="location.hash='forum';setTimeout(()=>setHomeFilter('tag',${escapeHtml(JSON.stringify(t))}),0)" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
        </div>`
     : '';
 
   app.innerHTML = `
     <div style="margin-bottom:10px">
-      <button class="ghost" onclick="location.hash='home'">← 返回列表</button>
+      <button class="ghost" onclick="location.hash='forum'">← 返回列表</button>
     </div>
     <div class="card detail-header">
       <div class="meta">
@@ -607,7 +625,7 @@ async function renderDetail(app, postId) {
       if (!confirm('确定要删除该帖子吗？将无法恢复。')) return;
       delPostBtn.disabled = true;
       const r = await api.posts.remove(p.id);
-      if (r.success) { alert('已删除'); location.hash = 'home'; }
+      if (r.success) { alert('已删除'); location.hash = 'forum'; }
       else { delPostBtn.disabled = false; alert(r.message); }
     });
   }
@@ -1145,7 +1163,7 @@ window.doLogin = async function doLogin() {
     const r = await api.auth.login(uid, password);
     if (r.success) {
       await renderTopBar();
-      location.hash = 'home';
+      location.hash = 'forum';
     } else alert(r.message || '登录失败');
   } finally {
     btn.disabled = false; btn.textContent = '登录';
@@ -1173,7 +1191,7 @@ window.doRegister = async function doRegister() {
     if (lr.success) {
       await renderTopBar();
       alert('注册成功！已自动登录');
-      location.hash = 'home';
+      location.hash = 'forum';
     } else {
       alert('注册成功，请手动登录：' + (lr.message || ''));
       location.hash = 'login';
@@ -1248,7 +1266,7 @@ window.doPost = async function doPost() {
   btn.disabled = true; btn.textContent = '发布中...';
   try {
     const r = await api.posts.create(title, content, tags, category, draftPostPinned);
-    if (r.success) location.hash = 'home';
+    if (r.success) location.hash = 'forum';
     else alert(r.message || '发布失败');
   } finally {
     btn.disabled = false; btn.textContent = '发布';
@@ -1269,7 +1287,8 @@ function route() {
   else if (path === 'me') renderMe(app);
   else if (path === 'messages') renderMessages(app);
   else if (path === 'announcements') renderAnnouncements(app);
-  else renderHome(app);
+  else if (path === 'forum') renderForum(app);
+  else renderCover(app);
 }
 
 window.addEventListener('hashchange', route);
