@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-about';
+import * as api from './api.js?v=20260827-reg-agree';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -486,6 +486,10 @@ function renderRegister(app) {
       <input id="pwd2Input" type="password" placeholder="再次输入密码" autocomplete="new-password">
       <input id="nickInput" placeholder="昵称（1-20字，可选）" maxlength="20">
       <textarea id="bioInput" placeholder="个人简介（可选，200字内）" maxlength="200" style="min-height:60px"></textarea>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin:8px 0;font-size:13px;line-height:1.5;cursor:pointer">
+        <input id="agreeInput" type="checkbox" style="margin-top:3px">
+        <span>我已阅读并同意 <a href="#about" target="_blank" onclick="event.stopPropagation()">《关于本站》</a> 中的全部声明（含站点性质、用户责任与行为规范、内容免责、侵权处理、未成年人保护、知识产权等条款）。</span>
+      </label>
       <button id="regBtn" onclick="doRegister()">注册</button>
       <p class="hint">
         已经有账号？<a href="#login">直接登录 →</a><br>
@@ -1499,6 +1503,7 @@ window.doRegister = async function doRegister() {
   if (!/^\d{8}$/.test(uid)) return alert('请输入 8 位数字 UID');
   if (pwd.length < 6) return alert('密码至少 6 位');
   if (pwd !== confirm) return alert('两次输入的密码不一致');
+  if (!document.getElementById('agreeInput').checked) return alert('请先阅读并勾选同意《关于本站》中的声明后再注册');
   const payload = { uid, password: pwd };
   if (nickname) payload.nickname = nickname;
   if (bio) payload.bio = bio;
