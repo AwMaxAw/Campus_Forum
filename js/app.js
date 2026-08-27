@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-route-fix';
+import * as api from './api.js?v=20260827-tab-pos';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -238,7 +238,6 @@ async function renderForum(app) {
     ${topBanner}
     <!-- 搜索条（所有访客都看得到） -->
     <div class="card search-panel">
-      ${tabBarHtml}
       <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索帖子</h3>
       <div class="search-row">
         <input id="sqInput" placeholder="关键字（搜标题/正文，如：数学、社团招新）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
@@ -264,7 +263,8 @@ async function renderForum(app) {
         <button class="secondary" onclick="clearHomeFilters()">🗑 清除条件</button>
         <span id="filterBadges" style="flex:1;display:flex;flex-wrap:wrap;gap:4px;align-items:center"></span>
       </div>
-      <div id="popularTags" style="margin-top:10px">🔄 正在读取热门标签…</div>
+      ${tabBarHtml}
+      <div id="popularTags">🔄 正在读取热门标签…</div>
     </div>
 
     <div class="card">
