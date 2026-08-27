@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-admin-posts';
+import * as api from './api.js?v=20260827-multi-tag';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -169,16 +169,40 @@ function buildHomeHash(f) {
   const qs = qp.toString();
   return '#forum' + (qs ? `?${qs}` : '');
 }
+// 多标签：tag 存为逗号分隔字符串（如 "高二,羽毛球"），这里统一解析成数组
+function tagList(s) {
+  return String(s == null ? '' : s).split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+}
 window.setHomeFilter = function setHomeFilter(key, value) {
   const f = getHomeFilters();
   if (key === 'sort') f.sortBy = value || 'latest';
   else if (key === 'category') f.category = value || '';
+  else if (key === 'tag') {
+    // value 为空串 = 清除全部标签；非空 = toggle（在/不在集合就移除/添加）
+    if (!value) {
+      f.tag = '';
+    } else {
+      const list = tagList(f.tag);
+      const v = String(value).trim().replace(/^#/, '');
+      const i = list.indexOf(v);
+      if (i >= 0) list.splice(i, 1);
+      else if (v) list.push(v);
+      f.tag = list.join(',');
+    }
+  }
   else f[key] = value || '';
   location.hash = buildHomeHash(f);
   setTimeout(route, 0);
 };
-// 帖子 chip 点一下是按 tag 搜；但如果首页没有任何查询条件且点了多个 tag chip，
-// 这里只做"单选 tag"语义（一次只筛一个标签）。
+// 移除单个标签筛选（filterBadge 的 × 用）
+window._removeHomeTag = function _removeHomeTag(value) {
+  const f = getHomeFilters();
+  const v = String(value || '').trim().replace(/^#/, '');
+  f.tag = tagList(f.tag).filter(t => t !== v).join(',');
+  location.hash = buildHomeHash(f);
+  setTimeout(route, 0);
+};
+// 帖子 chip / 热门标签 chip 点击 = toggle 单个标签（多选）
 window.clearHomeFilters = function clearHomeFilters() {
   location.hash = '#forum';
   setTimeout(route, 0);
@@ -243,7 +267,7 @@ async function renderForum(app) {
       <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索帖子</h3>
       <div class="search-row">
         <input id="sqInput" placeholder="关键字（搜标题/正文，如：数学、社团招新）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
-        <input id="stagInput" placeholder="按标签筛选（如：高二、羽毛球）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+        <input id="stagInput" placeholder="按标签筛选（多个用逗号或 # 分隔，如：高二,羽毛球）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
       </div>
       <div class="search-row">
         <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
@@ -282,9 +306,10 @@ async function renderForum(app) {
     if (!resp.success) { box.outerHTML = ''; return; }
     const tags = (resp.data && resp.data.tags) || [];
     if (tags.length === 0) { box.outerHTML = ''; return; }
-    box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 最近 30 天热门标签（点一下直接按该标签筛选）：</div>
+    const activeTags = new Set(tagList(filters.tag));
+    box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 最近 30 天热门标签（点击多选筛选，可叠加）：</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">${tags.map(t =>
-        `<span class="tag-chip ${filters.tag===t.tag?'active-tag':''}" onclick="setHomeFilter('tag',${escapeHtml(JSON.stringify(t.tag))})" title="该标签出现 ${t.count} 次">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
+        `<span class="tag-chip ${activeTags.has(t.tag)?'active-tag':''}" onclick="setHomeFilter('tag',${escapeHtml(JSON.stringify(t.tag))})" title="该标签出现 ${t.count} 次，点击切换筛选">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
       ).join('')}</div>`;
   })().catch(() => { /* 热门标签读取失败不用影响主流程 */ });
 
@@ -323,7 +348,11 @@ async function renderForum(app) {
       const badges = [];
       if (applied.category) badges.push(`<span class="filter-badge">分区：<b>${escapeHtml(CATEGORY_LABEL[applied.category] || applied.category)}</b><button class="chip-close" onclick="setHomeFilter('category','')">×</button></span>`);
       if (applied.q) badges.push(`<span class="filter-badge">关键字：<b>${escapeHtml(applied.q)}</b><button class="chip-close" onclick="setHomeFilter('q','')">×</button></span>`);
-      if (applied.tag) badges.push(`<span class="filter-badge">标签：<b>#${escapeHtml(applied.tag)}</b><button class="chip-close" onclick="setHomeFilter('tag','')">×</button></span>`);
+      if (applied.tag) {
+        for (const t of tagList(applied.tag)) {
+          badges.push(`<span class="filter-badge">标签：<b>#${escapeHtml(t)}</b><button class="chip-close" onclick="window._removeHomeTag(${escapeHtml(JSON.stringify(t))})">×</button></span>`);
+        }
+      }
       if (applied.dateFrom) badges.push(`<span class="filter-badge">从 <b>${escapeHtml(applied.dateFrom)}</b><button class="chip-close" onclick="setHomeFilter('dateFrom','')">×</button></span>`);
       if (applied.dateTo) badges.push(`<span class="filter-badge">到 <b>${escapeHtml(applied.dateTo)}</b><button class="chip-close" onclick="setHomeFilter('dateTo','')">×</button></span>`);
       badgeBox.innerHTML = badges.join('');
@@ -346,7 +375,8 @@ window.homeRunSearch = function homeRunSearch() {
   const sSort = document.getElementById('sSort');
   const f = getHomeFilters();
   f.q = (sq && sq.value || '').trim();
-  f.tag = (stag && stag.value || '').trim().replace(/^#/, '');
+  // 多标签：把输入框文本按逗号/# 解析成集合再拼回（规范化，去重，去 # 前缀）
+  f.tag = [...new Set(tagList(stag && stag.value || ''))].join(',');
   f.dateFrom = (sFrom && sFrom.value || '');
   f.dateTo = (sTo && sTo.value || '');
   f.sortBy = (sSort && sSort.value) || 'latest';

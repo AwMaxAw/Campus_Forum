@@ -92,9 +92,13 @@ posts.get('/', async (c) => {
       params.push(`%${q}%`, `%${q}%`);
     }
     if (tag) {
-      // 首尾补逗号后匹配，避免"数学"误包含进"高等数学"里的子串
-      whereParts.push("(',' || p.tags || ',') LIKE ?");
-      params.push(`%,${tag},%`);
+      // 多标签筛选：tag 可为逗号分隔的多个标签，AND 语义（帖子需同时包含全部选中标签）
+      // 首尾补逗号匹配，避免"数学"误包含进"高等数学"的子串
+      const tagList = String(tag).split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+      for (const t of tagList) {
+        whereParts.push("(',' || p.tags || ',') LIKE ?");
+        params.push(`%,${t},%`);
+      }
     }
     if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
       whereParts.push('DATE(p.created_at) >= DATE(?)');
