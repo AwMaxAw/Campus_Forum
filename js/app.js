@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-nav-layout';
+import * as api from './api.js?v=20260827-drawer';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -88,16 +88,6 @@ async function renderTopBar() {
         ? `<span style="color:#b45309;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">管理员</span>`
         : '';
     nav.innerHTML = `
-      <button class="ghost" onclick="location.hash='home'">🏠 首页</button>
-      <button class="ghost" onclick="location.hash='forum'">📢 广场</button>
-      <button class="ghost" onclick="location.hash='me'">👤 我的</button>
-      <button class="ghost" onclick="location.hash='announcements'">📋 公告</button>
-      <button class="ghost" onclick="location.hash='messages'">
-        💬 私信${unreadMsg ? `<span class="unread-badge">${unreadMsg}</span>` : ''}
-      </button>
-      <button class="ghost" onclick="location.hash='about'">ℹ️ 关于本站</button>
-      ${(me.role === 'admin' || me.role === 'dev_admin')
-        ? `<button class="ghost" onclick="location.hash='admin'" style="color:#b45309">🛡 管理员面板</button>` : ''}
       <span class="nav-right-group">
         <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
         <button class="secondary" onclick="doLogout()">退出</button>
@@ -105,16 +95,62 @@ async function renderTopBar() {
     `;
   } else {
     nav.innerHTML = `
-      <button class="ghost" onclick="location.hash='home'">🏠 首页</button>
-      <button class="ghost" onclick="location.hash='announcements'">📢 公告</button>
-      <button class="ghost" onclick="location.hash='about'">ℹ️ 关于本站</button>
       <span class="nav-right-group">
         <button class="secondary" onclick="location.hash='register'">注册</button>
         <button class="secondary" onclick="location.hash='login'">登录</button>
       </span>
     `;
   }
+  renderDrawer(loggedIn, me, unreadMsg);
 }
+
+// ==================== 左侧抽屉 ====================
+function renderDrawer(loggedIn, me, unreadMsg) {
+  const drawerNav = document.getElementById('drawerNav');
+  if (!drawerNav) return;
+  const isAdmin = loggedIn && me && (me.role === 'admin' || me.role === 'dev_admin');
+  const items = loggedIn
+    ? [
+        { label: '首页',     icon: '🏠', hash: 'home' },
+        { label: '广场',     icon: '📢', hash: 'forum' },
+        { label: '我的',     icon: '👤', hash: 'me' },
+        { label: '公告',     icon: '📋', hash: 'announcements' },
+        { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
+        { label: '关于本站', icon: 'ℹ️', hash: 'about' },
+        ...(isAdmin ? [{ label: '管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
+      ]
+    : [
+        { label: '首页',     icon: '🏠', hash: 'home' },
+        { label: '公告',     icon: '📋', hash: 'announcements' },
+        { label: '关于本站', icon: 'ℹ️', hash: 'about' },
+      ];
+
+  const cur = (location.hash || '').split('?')[0].slice(1) || 'home';
+  drawerNav.innerHTML = items.map(it => {
+    const active = cur === it.hash ? 'active' : '';
+    const badge = it.badge ? `<span class="unread-badge">${it.badge}</span>` : '';
+    const style = it.highlight ? 'style="color:#b45309"' : '';
+    return `<a href="#${it.hash}" class="${active}" ${style} onclick="closeDrawer()">
+      <span>${it.icon}</span>
+      <span>${escapeHtml(it.label)}</span>
+      ${badge}
+    </a>`;
+  }).join('');
+}
+function openDrawer() {
+  const d = document.getElementById('sideDrawer');
+  const o = document.getElementById('drawerOverlay');
+  if (d) d.classList.add('open');
+  if (o) o.classList.add('open');
+}
+function closeDrawer() {
+  const d = document.getElementById('sideDrawer');
+  const o = document.getElementById('drawerOverlay');
+  if (d) d.classList.remove('open');
+  if (o) o.classList.remove('open');
+}
+window.openDrawer = openDrawer;
+window.closeDrawer = closeDrawer;
 
 // ==================== 视图：帖子卡片（复用在首页列表/我的帖/我的赞/我的收藏） ====================
 function postCard(p, opts = {}) {
@@ -1637,7 +1673,7 @@ function route() {
   else renderCover(app);
 }
 
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => { route(); refreshDrawerActive(); });
 window.addEventListener('load', async () => {
   // 静默刷新登录态
   if (api.getToken()) {
@@ -1645,8 +1681,24 @@ window.addEventListener('load', async () => {
   }
   await renderTopBar();
   route();
+  // 绑定汉堡按钮 + 遮罩点击
+  const mt = document.getElementById('menuToggle');
+  const dc = document.getElementById('drawerClose');
+  const ov = document.getElementById('drawerOverlay');
+  if (mt) mt.addEventListener('click', openDrawer);
+  if (dc) dc.addEventListener('click', closeDrawer);
+  if (ov) ov.addEventListener('click', closeDrawer);
   // 登录后拉未读公告弹窗（异步，不阻塞渲染）
   popupUnreadAnnouncements();
   // 每 60 秒刷新一次未读消息数（顶栏红点）
   setInterval(() => { if (api.isLoggedIn()) renderTopBar(); }, 60 * 1000);
 });
+function refreshDrawerActive() {
+  const drawerNav = document.getElementById('drawerNav');
+  if (!drawerNav) return;
+  const cur = (location.hash || '').split('?')[0].slice(1) || 'home';
+  drawerNav.querySelectorAll('a').forEach(a => {
+    const href = (a.getAttribute('href') || '').replace(/^#/, '').split('?')[0];
+    a.classList.toggle('active', href === cur);
+  });
+}
