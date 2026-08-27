@@ -306,6 +306,71 @@ posts.post('/', requireAuth(), async (c) => {
   }
 });
 
+// ==================== 编辑帖子（JWT：仅 admin/dev_admin）====================
+posts.put('/:id', requireAuth(), async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id) || id <= 0) return fail('帖子 ID 无效');
+
+    const payload = c.get('jwtPayload');
+    const uid = payload && payload.sub;
+    const role = payload && payload.role;
+    const isAdmin = role === 'admin' || role === 'dev_admin';
+    if (!isAdmin) return fail('只有管理员才能编辑帖子', 403);
+
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+
+    const db = c.env.DB;
+    const post = await db.prepare('SELECT * FROM posts WHERE id = ? AND is_hidden = 0').bind(id).first();
+    if (!post) return fail('帖子不存在或已删除', 404);
+
+    // 可编辑字段：title / content / tags / category（不修改 created_at）
+    const title = (body.title || '').trim();
+    const content = (body.content || '').trim();
+    if (!title) return fail('标题不能为空');
+    if (!content) return fail('内容不能为空');
+    if (title.length > 100) return fail('标题不能超过 100 字');
+    if (content.length > 2000) return fail('内容不能超过 2000 字');
+
+    // tags
+    const rawTags = Array.isArray(body.tags)
+      ? body.tags
+      : (typeof body.tags === 'string' ? body.tags.split(/[,，\s]+/) : []);
+    const cleanTags = [...new Set(
+      rawTags.map(t => String(t).trim()).filter(Boolean).map(t => t.slice(0, 20))
+    )].slice(0, 5);
+    if (cleanTags.some(t => /["'\\<>{}]/.test(t))) return fail('标签不能包含特殊字符');
+    const tagsStr = cleanTags.join(',');
+
+    // category
+    let category = (body.category || '').trim();
+    if (!ALLOWED_CATEGORIES_KEYS.includes(category)) {
+      category = 'general';
+    }
+    if (category === 'meta' && !isAdmin) {
+      return fail('只有管理员才能发「站务」分区的帖子', 403);
+    }
+
+    // 只更新这 4 个字段 + updated_at（created_at 保持不变）
+    await db.prepare(
+      `UPDATE posts SET title = ?, content = ?, tags = ?, category = ?, updated_at = datetime('now') WHERE id = ?`
+    ).bind(title, content, tagsStr, category, id).run();
+
+    const updated = await db
+      .prepare(
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
+         FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
+      )
+      .bind(id)
+      .first();
+
+    return c.json(ok(mapPostRow(updated)));
+  } catch (e) {
+    return fail(`[posts update] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 // ==================== 删帖（JWT：作者本人 或 admin/dev_admin）====================
 posts.delete('/:id', requireAuth(), async (c) => {
   const id = parseInt(c.req.param('id'), 10);

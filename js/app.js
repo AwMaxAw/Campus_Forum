@@ -560,8 +560,13 @@ async function renderDetail(app, postId) {
         <button class="secondary" onclick="document.getElementById('commentInput').focus()">💬 评论 (${p.commentCount})</button>
         ${(me && (me.uid === p.authorUid || me.role === 'admin' || me.role === 'dev_admin'))
           ? `<button id="delPostBtn" class="danger">🗑 删除帖子</button>` : ''}
+        ${(me && (me.role === 'admin' || me.role === 'dev_admin'))
+          ? `<button id="editPostBtn" class="secondary">✏️ 编辑帖子</button>` : ''}
       </div>
     </div>
+
+    <!-- 管理员编辑帖子弹窗 -->
+    <div id="editPanel" style="display:none;margin-top:12px"></div>
 
     <div class="card comments-section">
       <h3>评论 (${p.commentCount})</h3>
@@ -610,6 +615,89 @@ async function renderDetail(app, postId) {
       const r = await api.posts.remove(p.id);
       if (r.success) { alert('已删除'); location.hash = 'home'; }
       else { delPostBtn.disabled = false; alert(r.message); }
+    });
+  }
+
+  // ---- 管理员编辑帖子 ----
+  const editPostBtn = document.getElementById('editPostBtn');
+  if (editPostBtn) {
+    editPostBtn.addEventListener('click', () => {
+      const panel = document.getElementById('editPanel');
+      const isVisible = panel.style.display !== 'none';
+      if (isVisible) { panel.style.display = 'none'; return; }
+
+      // 初始化编辑表单，预填当前帖子内容
+      const editTags = Array.isArray(p.tags) ? [...p.tags] : [];
+      const editCats = CATEGORIES.filter(c => true); // 管理员可见全部分区
+      panel.style.display = 'block';
+      panel.innerHTML = `
+        <div class="card" style="border:2px solid #2563eb">
+          <h3>✏️ 管理员编辑帖子</h3>
+          <p class="hint">编辑后保存，发帖时间保持不变，仅更新内容。</p>
+
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">📂 分区</label>
+          <select id="editCategorySelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff;margin-bottom:14px">
+            ${editCats.map(c => `<option value="${escapeHtml(c.key)}" ${c.key === p.category ? 'selected' : ''}>${escapeHtml(c.label)}${c.adminOnly?' 🔒管':''}　— ${escapeHtml(c.description||'')}</option>`).join('')}
+          </select>
+
+          <input id="editTitleInput" placeholder="标题" maxlength="100" style="margin-bottom:10px" value="${escapeHtml(p.title)}">
+          <textarea id="editContentInput" placeholder="内容" maxlength="2000" style="margin-bottom:10px">${escapeHtml(p.content)}</textarea>
+
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏷 标签（用 # 分隔，最多 5 个）</label>
+          <div id="editTagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+          <input id="editTagInput" placeholder="用 # 分隔标签，例：#高二#数学" maxlength="200" style="width:100%;margin-bottom:10px">
+
+          <button id="saveEditBtn" onclick="window._doEditPost(${p.id})">保存修改</button>
+          <button class="secondary" id="cancelEditBtn">取消</button>
+        </div>
+      `;
+
+      // 标签 chip 逻辑（复用 # 分隔逻辑）
+      const editTagInput = document.getElementById('editTagInput');
+      const editChipsBox = document.getElementById('editTagChips');
+      function renderEditChips() {
+        editChipsBox.innerHTML = editTags.map((t, i) =>
+          `<span class="tag-chip input-chip">#${escapeHtml(t)}<button class="chip-close" data-idx="${i}" aria-label="删除">×</button></span>`
+        ).join('');
+        editChipsBox.querySelectorAll('.chip-close').forEach(btn => {
+          btn.addEventListener('click', e => {
+            editTags.splice(parseInt(e.currentTarget.getAttribute('data-idx'), 10), 1);
+            renderEditChips();
+          });
+        });
+      }
+      function addEditTagFromInput() {
+        const raw = (editTagInput.value || '').trim();
+        if (!raw) return;
+        const items = raw.split(/#+/).map(s => s.trim()).filter(Boolean);
+        for (const it of items) {
+          const t = it.slice(0, 20);
+          if (!editTags.includes(t) && editTags.length < 5 && !/["'\\<>{}]/.test(t)) editTags.push(t);
+        }
+        editTagInput.value = '';
+        renderEditChips();
+      }
+      editTagInput.addEventListener('keydown', e => {
+        if (e.key === '#' && editTagInput.value) {
+          const items = editTagInput.value.split(/#+/).map(s => s.trim()).filter(Boolean);
+          for (const it of items) {
+            const t = it.slice(0, 20);
+            if (!editTags.includes(t) && editTags.length < 5 && !/["'\\<>{}]/.test(t)) editTags.push(t);
+          }
+          editTagInput.value = '';
+          renderEditChips();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          addEditTagFromInput();
+        }
+      });
+      editTagInput.addEventListener('blur', () => addEditTagFromInput());
+      renderEditChips();
+
+      document.getElementById('cancelEditBtn').addEventListener('click', () => {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+      });
     });
   }
 
@@ -1072,6 +1160,45 @@ window.doLogout = function doLogout() {
   renderTopBar();
   location.hash = 'home';
 };
+// ==================== 管理员编辑帖子保存 ====================
+window._doEditPost = async function doEditPost(postId) {
+  const title = document.getElementById('editTitleInput').value.trim();
+  const content = document.getElementById('editContentInput').value.trim();
+  const category = document.getElementById('editCategorySelect').value;
+  // 收集标签 chip（DOM 里的 textContent）
+  const tagChips = document.querySelectorAll('#editTagChips .tag-chip');
+  const tags = [];
+  tagChips.forEach(chip => {
+    let t = chip.textContent.replace(/^#/, '').replace(/×$/, '').trim();
+    if (t) tags.push(t);
+  });
+  // 也尝试从输入框吸收残留
+  const tagInput = document.getElementById('editTagInput');
+  if (tagInput && tagInput.value) {
+    const items = tagInput.value.split(/#+/).map(s => s.trim()).filter(Boolean);
+    for (const it of items) {
+      const t = it.slice(0, 20);
+      if (!tags.includes(t) && tags.length < 5) tags.push(t);
+    }
+  }
+  if (!title || !content) return alert('标题和内容不能为空');
+
+  const btn = document.getElementById('saveEditBtn');
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    const r = await api.posts.update(postId, { title, content, tags, category });
+    if (r.success) {
+      alert('✅ 编辑成功！');
+      // 重新渲染详情页
+      renderDetail(document.getElementById('app'), postId);
+    } else {
+      alert(r.message || '编辑失败');
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = '保存修改';
+  }
+};
+
 window.doPost = async function doPost() {
   const title = document.getElementById('titleInput').value.trim();
   const content = document.getElementById('contentInput').value.trim();

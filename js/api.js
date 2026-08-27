@@ -226,6 +226,10 @@ export const posts = {
   async remove(id) {
     return request(`/api/posts/${id}`, { method: 'DELETE' });
   },
+  async update(id, { title, content, tags, category }) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/posts/${id}`, { method: 'PUT', body: { title, content, tags, category } });
+  },
 };
 
 // ======================== 评论 ========================
