@@ -50,7 +50,7 @@ function categoryBadgeHtml(key, opts = {}) {
   const color = CATEGORY_COLOR[key] || '#6b7280';
   const light = toLightBg(color);
   const onclick = opts.clickable
-    ? `onclick="event.stopPropagation();setHomeFilter('category',${JSON.stringify(key)})" title="按「${label}」分区筛选" style="cursor:pointer"`
+    ? `onclick="event.stopPropagation();setHomeFilter('category',${escapeHtml(JSON.stringify(key))})" title="按「${label}」分区筛选" style="cursor:pointer"`
     : '';
   return `<span ${onclick} style="color:${color};background:${light};padding:1px 8px;border-radius:12px;font-size:12px;margin-right:6px;font-weight:500">${escapeHtml(label)}</span>`;
 }
@@ -111,7 +111,7 @@ function postCard(p, opts = {}) {
   const time = formatTime(p.createdAt);
   const tags = (Array.isArray(p.tags) && p.tags.length)
     ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
-         ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${JSON.stringify(t)})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+         ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${escapeHtml(JSON.stringify(t))})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
        </div>`
     : '';
   const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
@@ -215,7 +215,7 @@ async function renderHome(app) {
         ? `background:${color};color:#fff;border-color:${color}`
         : `background:#fff;color:${tab.cssColor || '#333'};border-color:#d2d2d7`;
       const adminBadge = tab.adminOnly ? '<small style="margin-left:4px;opacity:.9">🔒管</small>' : '';
-      return `<button onclick="setHomeFilter('category',${JSON.stringify(tab.key)})"
+      return `<button onclick="setHomeFilter('category',${escapeHtml(JSON.stringify(tab.key))})"
           style="padding:4px 12px;border-radius:999px;border:1px solid;font-size:13px;cursor:pointer;transition:.15s;${style}">
           ${tab.label}${adminBadge}
         </button>`;
@@ -270,7 +270,7 @@ async function renderHome(app) {
     if (tags.length === 0) { box.outerHTML = ''; return; }
     box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 最近 30 天热门标签（点一下直接按该标签筛选）：</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">${tags.map(t =>
-        `<span class="tag-chip ${filters.tag===t.tag?'active-tag':''}" onclick="setHomeFilter('tag',${JSON.stringify(t.tag)})" title="该标签出现 ${t.count} 次">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
+        `<span class="tag-chip ${filters.tag===t.tag?'active-tag':''}" onclick="setHomeFilter('tag',${escapeHtml(JSON.stringify(t.tag))})" title="该标签出现 ${t.count} 次">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
       ).join('')}</div>`;
   })().catch(() => { /* 热门标签读取失败不用影响主流程 */ });
 
@@ -533,7 +533,7 @@ async function renderDetail(app, postId) {
   const catBadge = categoryBadgeHtml(p.category);
   const tagsHtml = (Array.isArray(p.tags) && p.tags.length)
     ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
-         ${p.tags.map(t => `<span class="tag-chip" onclick="location.hash='home';setTimeout(()=>setHomeFilter('tag',${JSON.stringify(t)}),0)" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+         ${p.tags.map(t => `<span class="tag-chip" onclick="location.hash='home';setTimeout(()=>setHomeFilter('tag',${escapeHtml(JSON.stringify(t))}),0)" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
        </div>`
     : '';
 
