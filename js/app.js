@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-admin-panel';
+import * as api from './api.js?v=20260827-admin-posts';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -1147,6 +1147,13 @@ async function renderAdmin(app) {
       <p class="hint">多个置顶帖按下方顺序排列，越靠前越优先显示在列表顶部。用 ↑↓ 调整顺序后点「保存顺序」生效。</p>
       <div id="adminPinned">🔄 加载中...</div>
     </div>
+
+    <!-- 板块4：其他帖子列表（非置顶，按时间倒序，点击可进详情） -->
+    <div class="card">
+      <h3 style="margin-top:0">📄 其他帖子</h3>
+      <p class="hint">除置顶帖外的全部帖子，按发布时间倒序列出。点击标题可跳转详情页编辑/管理。</p>
+      <div id="adminPosts">🔄 加载中...</div>
+    </div>
   `;
 
   // --- 板块1：账号列表 ---
@@ -1211,6 +1218,30 @@ async function renderAdmin(app) {
       renderAdminPinList();
     } catch (e) { document.getElementById('adminPinned').innerHTML = `❌ ${escapeHtml(e.message)}`; }
   })();
+
+  // --- 板块4：其他帖子（非置顶，只读列表）---
+  (async () => {
+    const host = document.getElementById('adminPosts');
+    try {
+      const r = await api.admin.listPosts();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = r.data || [];
+      if (list.length === 0) { host.innerHTML = `<span class="hint">暂无其他帖子</span>`; return; }
+      host.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${list.length} 条非置顶帖</div>
+        ${list.map(p => {
+          const author = p.authorNickname || `用户${p.authorUid}`;
+          const tagHtml = (Array.isArray(p.tags) && p.tags.length)
+            ? p.tags.map(t => `<span class="tag-chip" style="font-size:11px;padding:1px 6px">#${escapeHtml(t)}</span>`).join('')
+            : '';
+          return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px">
+            ${categoryBadgeHtml(p.category)}
+            <a href="#detail/${p.id}" style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
+            ${tagHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;flex-basis:100%;margin-top:2px">${tagHtml}</div>` : ''}
+            <span style="white-space:nowrap;color:#6b7280;font-size:12px;margin-left:auto">${escapeHtml(author)} · ${escapeHtml(formatTime(p.createdAt))}</span>
+          </div>`;
+        }).join('')}`;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
 }
 
 function renderAdminPinList() {
@@ -1224,13 +1255,15 @@ function renderAdminPinList() {
   host.innerHTML = `
     <div id="adminPinRows">
       ${_adminPinOrder.map((id, idx) => {
-        const p = byId.get(id) || { id, title: '(该帖已不存在)', category: '' };
+        const p = byId.get(id) || { id, title: '(该帖已不存在)', category: '', authorUid: '', authorNickname: null, createdAt: '' };
         const isFirst = idx === 0;
         const isLast = idx === _adminPinOrder.length - 1;
+        const author = p.authorNickname || (p.authorUid ? `用户${p.authorUid}` : '');
         return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;background:#fffbeb">
           <span style="font-weight:700;color:#b45309;min-width:24px;text-align:center">${idx + 1}</span>
           ${categoryBadgeHtml(p.category)}
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
+          <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(author)}${p.createdAt ? ` · ${escapeHtml(formatTime(p.createdAt))}` : ''}</span>
           <button class="ghost" ${isFirst ? 'disabled' : ''} onclick="window._adminPinMove(${id},-1)" style="padding:2px 10px">↑</button>
           <button class="ghost" ${isLast ? 'disabled' : ''} onclick="window._adminPinMove(${id},1)" style="padding:2px 10px">↓</button>
         </div>`;

@@ -167,4 +167,28 @@ admin.get('/tags', requireAdmin(), async (c) => {
   }
 });
 
+// ==================== 非置顶帖列表（按创建时间倒序，管理员只读展示用）====================
+admin.get('/posts', requireAdmin(), async (c) => {
+  try {
+    const db = c.env.DB;
+    const rows = await db
+      .prepare(
+        `SELECT p.id, p.title, p.author_uid, p.category, p.tags, p.is_pinned, p.pin_order, p.created_at,
+                u.nickname AS author_nickname, u.role AS author_role,
+                p.view_count, p.like_count, p.comment_count
+         FROM posts p
+         LEFT JOIN users u ON u.uid = p.author_uid
+         WHERE p.is_pinned = 0 AND p.is_hidden = 0
+         ORDER BY p.created_at DESC
+         LIMIT 500`
+      )
+      .all();
+    return c.json(ok((rows.results || []).map(mapPostRow), {
+      total: (rows.results || []).length,
+    }));
+  } catch (e) {
+    return fail(`[admin posts] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 export default admin;

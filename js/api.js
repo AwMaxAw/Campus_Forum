@@ -330,6 +330,11 @@ export const admin = {
     if (!tokenCache) return { success: false, message: '请先登录' };
     return request('/api/admin/pinned-posts');
   },
+  /** 列出所有非置顶帖（按 created_at 倒序，只读展示用） */
+  async listPosts() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin/posts');
+  },
   /** 批量调整置顶帖顺序：order 为帖子 id 数组，顺序即新 pin_order(1,2,3...) */
   async updatePinOrder(order) {
     if (!tokenCache) return { success: false, message: '请先登录' };
