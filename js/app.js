@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-profile';
+import * as api from './api.js?v=20260827-kv';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -1010,11 +1010,21 @@ window.saveEditComment = async function saveEditComment(commentId, postId, btnEl
 
 // ==================== 视图：个人中心（我的帖 / 我点赞 / 我收藏） ====================
 // 生成头像内部 HTML：首字母占位 + 可选图片绝对覆盖（图片加载失败 onerror 自动隐藏 → 露出首字母）
-function buildAvatarInner(user) {
+// overrideSrc：上传完用本地 object URL 立即预览，绕过 KV 最终一致性延迟
+function buildAvatarInner(user, overrideSrc) {
   const initials = ((user && (user.nickname || user.uid)) || '?').slice(0, 1).toUpperCase();
-  const src = api.getAvatarUrl(user);
+  const src = overrideSrc != null ? overrideSrc : api.getAvatarUrl(user);
   return `<span class="avatar-initials">${escapeHtml(initials)}</span>` +
     (src ? `<img class="avatar-img" src="${escapeHtml(src)}" alt="头像" onerror="this.style.display='none'">` : '');
+}
+// 上传完但 KV 还没全球同步时的本地预览 URL；renderMe 重新进入时清空（那时 KV 已同步）
+let _pendingAvatarSrc = null;
+// 用指定 src 刷新个人主页两处头像（顶部 header + 编辑预览），不动文本和输入框
+function setAvatarPreviewsSrc(src) {
+  const me = api.getCurrentUser();
+  const html = buildAvatarInner(me, src);
+  const h = document.getElementById('meHeaderAvatar'); if (h) h.innerHTML = html;
+  const p = document.getElementById('editAvatarPreview'); if (p) p.innerHTML = html;
 }
 // 角色徽章（个人主页 header 用）
 function roleBadgeInline(role) {
@@ -1030,7 +1040,7 @@ function refreshMyProfileDisplay() {
   const header = document.getElementById('meProfileHeader');
   if (header) {
     header.innerHTML = `
-      <div class="avatar-lg" id="meHeaderAvatar">${buildAvatarInner(me)}</div>
+      <div class="avatar-lg" id="meHeaderAvatar">${buildAvatarInner(me, _pendingAvatarSrc)}</div>
       <div style="flex:1">
         <div class="profile-name">${escapeHtml(me.nickname)}${roleBadgeInline(me.role)}</div>
         <div class="profile-uid">UID：${escapeHtml(me.uid)}　角色：${escapeHtml(me.role || 'member')}</div>
@@ -1039,12 +1049,13 @@ function refreshMyProfileDisplay() {
     `;
   }
   const preview = document.getElementById('editAvatarPreview');
-  if (preview) preview.innerHTML = buildAvatarInner(me);
+  if (preview) preview.innerHTML = buildAvatarInner(me, _pendingAvatarSrc);
   if (typeof renderTopBar === 'function') renderTopBar();
 }
 
 async function renderMe(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  _pendingAvatarSrc = null;   // 重新进入「我的」时 KV 早已同步，回退到正式取图 URL
   const me = api.getCurrentUser();
 
   app.innerHTML = `
@@ -1197,13 +1208,22 @@ window.onAvatarFilePicked = async function onAvatarFilePicked(input) {
   if (!file) return;
   const msg = document.getElementById('profileMsg');
   const setMsg = (t, color) => { if (msg) { msg.textContent = t; msg.style.color = color || ''; } };
+  // 先用本地 object URL 立即预览，不等 KV 全球同步
+  let localUrl = '';
+  try { localUrl = URL.createObjectURL(file); } catch {}
+  if (localUrl) setAvatarPreviewsSrc(localUrl);
   setMsg('上传中...', '');
   const r = await api.auth.uploadAvatar(file);
   if (r.success) {
     setMsg('✅ 头像已更新', '#059669');
-    refreshMyProfileDisplay();
+    // 记住本地预览，后续保存资料/刷新不会用未同步的 KV URL 覆盖
+    _pendingAvatarSrc = localUrl || null;
   } else {
     setMsg('❌ ' + (r.message || '上传失败'), '#dc2626');
+    // 失败：回退到之前的正式头像（userCache 仍是旧值）
+    _pendingAvatarSrc = null;
+    refreshMyProfileDisplay();
+    if (localUrl) { try { URL.revokeObjectURL(localUrl); } catch {} }
   }
   input.value = '';   // 允许重复选同一文件触发 onchange
 };
@@ -1216,6 +1236,8 @@ window.clearAvatar = async function clearAvatar() {
   const r = await api.auth.updateProfile({ avatarUrl: '' });   // 空串 = 清空头像
   if (r.success) {
     setMsg('✅ 已移除头像', '#059669');
+    if (_pendingAvatarSrc) { try { URL.revokeObjectURL(_pendingAvatarSrc); } catch {} }
+    _pendingAvatarSrc = null;
     refreshMyProfileDisplay();
   } else {
     setMsg('❌ ' + (r.message || '移除失败'), '#dc2626');
@@ -1237,7 +1259,7 @@ window.doSaveProfile = async function doSaveProfile() {
   btn.disabled = true; btn.textContent = '保存中...';
   msg.textContent = ''; msg.style.color = '';
   try {
-    // 头像外链留空则不传 → 不会覆盖已上传的 R2 头像
+    // 头像外链留空则不传 → 不会覆盖已上传的 KV 头像
     const body = { nickname, bio };
     if (urlVal) body.avatarUrl = urlVal;
     const r = await api.auth.updateProfile(body);
@@ -1246,6 +1268,11 @@ window.doSaveProfile = async function doSaveProfile() {
       msg.textContent = '✅ 资料已保存';
       const urlInput = document.getElementById('avatarUrlInput');
       if (urlInput) urlInput.value = '';   // 已生效，清空避免重复保存又覆盖
+      if (urlVal) {
+        // 头像换成了外链 → 本地上传预览 blob 作废
+        if (_pendingAvatarSrc) { try { URL.revokeObjectURL(_pendingAvatarSrc); } catch {} }
+        _pendingAvatarSrc = null;
+      }
       refreshMyProfileDisplay();
     } else {
       msg.style.color = '#dc2626';

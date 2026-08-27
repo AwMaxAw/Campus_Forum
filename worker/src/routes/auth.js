@@ -254,21 +254,23 @@ auth.put('/me/profile', requireAuth(), async (c) => {
   }
 });
 
-// ==================== 上传头像到 R2（仅需登录）====================
+// ==================== 上传头像到 KV（仅需登录）====================
 // multipart/form-data，字段名 file；存为 avatars/<uid>/<时间戳随机>.<ext>
-// 成功后直接把 users.avatar_url 更新为 'r2:<key>'，前端用 GET /api/auth/avatar/:uid 取图。
+// 成功后直接把 users.avatar_url 更新为 'kv:<key>'，前端用 GET /api/auth/avatar/:uid 取图。
+// KV 免费档不要绑卡；写入后全球同步最多约 1 分钟，上传完用本地 object URL 立即预览兜底。
 auth.post('/me/avatar', requireAuth(), async (c) => {
   try {
-    if (!c.env || !c.env.AVATARS) {
-      return fail('头像上传未启用：R2 存储未配置（请联系站长启用 R2）', 503);
+    if (!c.env || !c.env.AVATARS || typeof c.env.AVATARS.put !== 'function') {
+      return fail('头像上传未启用：KV 存储未配置', 503);
     }
     const payload = c.get('jwtPayload');
     if (!payload || !payload.sub) return fail('无效的 token', 401);
     const uid = payload.sub;
 
     let form;
-    try { form = await c.req.parseBody(); } catch { return fail('请求体解析失败（需 multipart/form-data）'); }
-    const file = form && form.file;
+    try { form = await c.req.raw.formData(); } catch { return fail('请求体解析失败（需 multipart/form-data）'); }
+    // 标准 FormData 用 .get()；兼容 parseBody 返回的普通对象
+    const file = form ? (typeof form.get === 'function' ? form.get('file') : form.file) : null;
     if (!file || typeof file.arrayBuffer !== 'function') return fail('缺少文件字段 file');
 
     const type = (file.type || '').toLowerCase();
@@ -284,19 +286,19 @@ auth.post('/me/avatar', requireAuth(), async (c) => {
     const ts = Date.now();
     const rand = Math.random().toString(36).slice(2, 8);
     const key = `avatars/${uid}/${ts}-${rand}.${ext}`;
-    await c.env.AVATARS.put(key, data, { httpMetadata: { contentType: type || 'image/png' } });
+    await c.env.AVATARS.put(key, data, { metadata: { contentType: type || 'image/png' } });
 
-    // 删旧头像（如有），避免 R2 堆积；r2: 前缀的旧 key 才删
+    // 删旧头像（如有），避免 KV 堆积；kv:/r2: 前缀的旧 key 才删
     const db = c.env.DB;
     const cur = await db.prepare('SELECT avatar_url FROM users WHERE uid = ?').bind(uid).first();
-    const oldKey = cur && typeof cur.avatar_url === 'string' && cur.avatar_url.startsWith('r2:')
-      ? cur.avatar_url.slice(3) : null;
+    const oldA = cur && typeof cur.avatar_url === 'string' ? cur.avatar_url : null;
+    const oldKey = (oldA && (oldA.startsWith('kv:') || oldA.startsWith('r2:'))) ? oldA.slice(3) : null;
     await db.prepare("UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE uid = ?")
-      .bind(`r2:${key}`, uid).run();
+      .bind(`kv:${key}`, uid).run();
     if (oldKey && oldKey !== key) {
       try { await c.env.AVATARS.delete(oldKey); } catch {}
     }
-    return c.json(ok({ avatarUrl: `r2:${key}` }));
+    return c.json(ok({ avatarUrl: `kv:${key}` }));
   } catch (e) {
     return fail(`[upload avatar] ${e.name}: ${e.message}`, 500);
   }
@@ -304,7 +306,7 @@ auth.post('/me/avatar', requireAuth(), async (c) => {
 
 // ==================== 公开取头像（无需登录，<img> 直接用）====================
 // GET /api/auth/avatar/:uid
-//   - avatar_url 形如 r2:<key> → 从 R2 流式返回原图
+//   - avatar_url 形如 kv:<key> → 从 KV 流式返回原图（带 contentType metadata）
 //   - 形如 http(s) 外链 → 302 跳转
 //   - 无 → 404（前端回退到首字母占位）
 auth.get('/avatar/:uid', async (c) => {
@@ -314,16 +316,20 @@ auth.get('/avatar/:uid', async (c) => {
     const row = await c.env.DB.prepare('SELECT avatar_url FROM users WHERE uid = ?').bind(uid).first();
     const url = row && row.avatar_url;
     if (!url) return new Response(null, { status: 404 });
-    if (url.startsWith('r2:')) {
-      if (!c.env || !c.env.AVATARS) return new Response(null, { status: 404 });
+    // KV 存储的头像
+    if (url.startsWith('kv:')) {
+      if (!c.env || !c.env.AVATARS || typeof c.env.AVATARS.getWithMetadata !== 'function') {
+        return new Response(null, { status: 404 });
+      }
       const key = url.slice(3);
-      const obj = await c.env.AVATARS.get(key);
-      if (!obj) return new Response(null, { status: 404 });
+      const r = await c.env.AVATARS.getWithMetadata(key, { type: 'stream' });
+      if (!r || !r.value) return new Response(null, { status: 404 });
       const headers = { 'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': '*' };
-      if (obj.httpMetadata && obj.httpMetadata.contentType) headers['Content-Type'] = obj.httpMetadata.contentType;
-      else headers['Content-Type'] = 'image/png';
-      return new Response(obj.body, { headers });
+      const ct = r.metadata && r.metadata.contentType;
+      headers['Content-Type'] = (ct && typeof ct === 'string') ? ct : 'image/png';
+      return new Response(r.value, { headers });
     }
+    // http(s) 外链 → 302 跳转
     if (/^https?:\/\//i.test(url)) return Response.redirect(url, 302);
     return new Response(null, { status: 404 });
   } catch (e) {

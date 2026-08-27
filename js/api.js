@@ -228,7 +228,8 @@ export function getAvatarUrl(user) {
   if (!user || !user.uid) return null;
   const a = user.avatarUrl;
   if (!a) return null;
-  if (typeof a === 'string' && a.startsWith('r2:')) {
+  // kv:（KV 存储）或 r2:（R2 存储，历史）→ 都走 Worker 公开取图接口
+  if (typeof a === 'string' && (a.startsWith('kv:') || a.startsWith('r2:'))) {
     const v = user.updatedAt || user.createdAt || '';
     return `${API_BASE}/api/auth/avatar/${encodeURIComponent(user.uid)}${v ? ('?v=' + encodeURIComponent(v)) : ''}`;
   }
