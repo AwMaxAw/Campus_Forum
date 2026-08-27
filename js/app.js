@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-tab-pos';
+import * as api from './api.js?v=20260827-edit-pin';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -659,7 +659,12 @@ async function renderDetail(app, postId) {
           <div id="editTagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
           <input id="editTagInput" placeholder="用 # 分隔标签，例：#高二#数学" maxlength="200" style="width:100%;margin-bottom:10px">
 
-          <button id="saveEditBtn" onclick="window._doEditPost(${p.id})">保存修改</button>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;padding:8px 10px;background:#fef3c7;border-radius:8px">
+            <input type="checkbox" id="editPinCheckbox" style="width:16px;height:16px;cursor:pointer" ${p.isPinned ? 'checked' : ''}>
+            <label for="editPinCheckbox" style="font-size:13px;color:#424245;cursor:pointer">📌 置顶此帖（管理员专属，置顶帖显示在列表最前面）</label>
+          </div>
+
+          <button id="saveEditBtn" onclick="window._doEditPost(${p.id}, ${!!p.isPinned})">保存修改</button>
           <button class="secondary" id="cancelEditBtn">取消</button>
         </div>
       `;
@@ -1206,7 +1211,7 @@ window.doLogout = function doLogout() {
   location.hash = 'home';
 };
 // ==================== 管理员编辑帖子保存 ====================
-window._doEditPost = async function doEditPost(postId) {
+window._doEditPost = async function doEditPost(postId, originalPinned = false) {
   const title = document.getElementById('editTitleInput').value.trim();
   const content = document.getElementById('editContentInput').value.trim();
   const category = document.getElementById('editCategorySelect').value;
@@ -1228,17 +1233,29 @@ window._doEditPost = async function doEditPost(postId) {
   }
   if (!title || !content) return alert('标题和内容不能为空');
 
+  // 置顶开关（管理员专属）：和原始状态对比，变化才调 pin 接口
+  const pinCheckbox = document.getElementById('editPinCheckbox');
+  const newPinned = pinCheckbox ? !!pinCheckbox.checked : !!originalPinned;
+  const pinChanged = newPinned !== !!originalPinned;
+
   const btn = document.getElementById('saveEditBtn');
   btn.disabled = true; btn.textContent = '保存中...';
   try {
     const r = await api.posts.update(postId, { title, content, tags, category });
-    if (r.success) {
-      alert('✅ 编辑成功！');
-      // 重新渲染详情页
-      renderDetail(document.getElementById('app'), postId);
-    } else {
-      alert(r.message || '编辑失败');
+    if (!r.success) { alert(r.message || '编辑失败'); return; }
+
+    // 内容保存成功后，若置顶状态变化，再调置顶接口
+    let pinMsg = '';
+    if (pinChanged) {
+      const pr = await api.posts.setPin(postId, newPinned);
+      if (!pr.success) {
+        pinMsg = `（但置顶操作失败：${pr.message || '未知错误'}）`;
+      }
     }
+
+    alert(`✅ 编辑成功！${pinMsg}`);
+    // 重新渲染详情页
+    renderDetail(document.getElementById('app'), postId);
   } finally {
     btn.disabled = false; btn.textContent = '保存修改';
   }

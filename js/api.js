@@ -230,6 +230,11 @@ export const posts = {
     if (!tokenCache) return { success: false, message: '请先登录' };
     return request(`/api/posts/${id}`, { method: 'PUT', body: { title, content, tags, category } });
   },
+  /** 置顶 / 取消置顶（管理员专属，后端会再校验角色） */
+  async setPin(id, isPinned) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/posts/${id}/pin`, { method: 'PATCH', body: { isPinned: !!isPinned } });
+  },
 };
 
 // ======================== 评论 ========================
