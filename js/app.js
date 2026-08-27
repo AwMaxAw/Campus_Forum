@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-admin';
+import * as api from './api.js?v=20260827-profile';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -1009,23 +1009,57 @@ window.saveEditComment = async function saveEditComment(commentId, postId, btnEl
 };
 
 // ==================== 视图：个人中心（我的帖 / 我点赞 / 我收藏） ====================
+// 生成头像内部 HTML：首字母占位 + 可选图片绝对覆盖（图片加载失败 onerror 自动隐藏 → 露出首字母）
+function buildAvatarInner(user) {
+  const initials = ((user && (user.nickname || user.uid)) || '?').slice(0, 1).toUpperCase();
+  const src = api.getAvatarUrl(user);
+  return `<span class="avatar-initials">${escapeHtml(initials)}</span>` +
+    (src ? `<img class="avatar-img" src="${escapeHtml(src)}" alt="头像" onerror="this.style.display='none'">` : '');
+}
+// 角色徽章（个人主页 header 用）
+function roleBadgeInline(role) {
+  if (role === 'dev_admin') return ' <span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">开发管理员</span>';
+  if (role === 'admin') return ' <span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">管理员</span>';
+  return '';
+}
+// 资料变更后局部刷新：个人主页顶部 header（头像+昵称+简介）+ 编辑表单预览 + 顶栏昵称
+// 不动 meContent 里的输入框，避免用户正在编辑的内容被清掉
+function refreshMyProfileDisplay() {
+  const me = api.getCurrentUser();
+  if (!me) return;
+  const header = document.getElementById('meProfileHeader');
+  if (header) {
+    header.innerHTML = `
+      <div class="avatar-lg" id="meHeaderAvatar">${buildAvatarInner(me)}</div>
+      <div style="flex:1">
+        <div class="profile-name">${escapeHtml(me.nickname)}${roleBadgeInline(me.role)}</div>
+        <div class="profile-uid">UID：${escapeHtml(me.uid)}　角色：${escapeHtml(me.role || 'member')}</div>
+        ${me.bio ? `<div class="profile-bio">${escapeHtml(me.bio)}</div>` : ''}
+      </div>
+    `;
+  }
+  const preview = document.getElementById('editAvatarPreview');
+  if (preview) preview.innerHTML = buildAvatarInner(me);
+  if (typeof renderTopBar === 'function') renderTopBar();
+}
+
 async function renderMe(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   const me = api.getCurrentUser();
 
-  const initials = (me.nickname || me.uid).slice(0, 1).toUpperCase();
   app.innerHTML = `
-    <div class="profile-header">
-      <div class="avatar-lg">${escapeHtml(initials)}</div>
+    <div class="profile-header" id="meProfileHeader">
+      <div class="avatar-lg" id="meHeaderAvatar">${buildAvatarInner(me)}</div>
       <div style="flex:1">
-        <div class="profile-name">${escapeHtml(me.nickname)}${me.role === 'dev_admin' ? ' <span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">开发管理员</span>' : ''}${me.role === 'admin' ? ' <span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">管理员</span>' : ''}</div>
+        <div class="profile-name">${escapeHtml(me.nickname)}${roleBadgeInline(me.role)}</div>
         <div class="profile-uid">UID：${escapeHtml(me.uid)}　角色：${escapeHtml(me.role || 'member')}</div>
         ${me.bio ? `<div class="profile-bio">${escapeHtml(me.bio)}</div>` : ''}
       </div>
     </div>
     <div class="toolbar">
       <div class="tab-bar">
-        <button id="tabMine" class="on" onclick="switchMeTab('mine')">📝 我发的帖</button>
+        <button id="tabProfile" class="on" onclick="switchMeTab('profile')">✏️ 资料</button>
+        <button id="tabMine" onclick="switchMeTab('mine')">📝 我发的帖</button>
         <button id="tabLikes" onclick="switchMeTab('likes')">♥ 点赞过</button>
         <button id="tabFavorites" onclick="switchMeTab('favorites')">★ 我的收藏</button>
         <button id="tabPassword" onclick="switchMeTab('password')">🔐 修改密码</button>
@@ -1034,15 +1068,16 @@ async function renderMe(app) {
     </div>
     <div id="meContent"><div class="empty">🔄 加载中...</div></div>
   `;
-  window._currentMeTab = 'mine';
-  loadMeTab('mine');
+  window._currentMeTab = 'profile';
+  loadMeTab('profile');
 }
 
 window.switchMeTab = function switchMeTab(tab) {
-  // 4 个 tab：mine / likes / favorites / password
-  const tabIdMap = { mine: 'tabMine', likes: 'tabLikes', favorites: 'tabFavorites', password: 'tabPassword' };
+  // 5 个 tab：profile / mine / likes / favorites / password
+  const tabIdMap = { profile: 'tabProfile', mine: 'tabMine', likes: 'tabLikes', favorites: 'tabFavorites', password: 'tabPassword' };
   Object.keys(tabIdMap).forEach(t => {
-    document.getElementById(tabIdMap[t]).classList.toggle('on', t === tab);
+    const el = document.getElementById(tabIdMap[t]);
+    if (el) el.classList.toggle('on', t === tab);
   });
   window._currentMeTab = tab;
   loadMeTab(tab);
@@ -1050,6 +1085,35 @@ window.switchMeTab = function switchMeTab(tab) {
 async function loadMeTab(tab) {
   const host = document.getElementById('meContent');
   if (!host) return;
+
+  // --- 编辑资料：头像（上传/外链）+ 昵称 + 简介 ---
+  if (tab === 'profile') {
+    const me = api.getCurrentUser() || {};
+    host.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">✏️ 编辑个人资料</h3>
+        <div class="profile-edit-row">
+          <div class="avatar-lg" id="editAvatarPreview">${buildAvatarInner(me)}</div>
+          <div class="profile-edit-avatar-actions">
+            <label class="secondary" for="avatarFile">📷 从设备上传</label>
+            <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="onAvatarFilePicked(this)">
+            <button class="ghost" onclick="clearAvatar()">移除头像</button>
+            <span class="hint">上传图片需 R2 已启用（≤2MB）；或下面填外链链接</span>
+          </div>
+        </div>
+        <input id="avatarUrlInput" placeholder="或填图片外链链接 https://... （留空 = 不修改头像）">
+        <label class="field-label" for="nicknameInput">昵称 <span class="hint">1-20 字</span></label>
+        <input id="nicknameInput" value="${escapeHtml(me.nickname || '')}" maxlength="20">
+        <label class="field-label" for="bioInput">自我简介 <span class="hint">最多 200 字</span></label>
+        <textarea id="bioInput" rows="3" maxlength="200" placeholder="一句话介绍自己（选填）">${escapeHtml(me.bio || '')}</textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <button id="saveProfileBtn" onclick="doSaveProfile()">保存资料</button>
+          <span class="hint" id="profileMsg"></span>
+        </div>
+      </div>
+    `;
+    return;
+  }
 
   // --- 修改密码：独立表单 ---
   if (tab === 'password') {
@@ -1124,6 +1188,71 @@ window.doChangePwd = async function doChangePwd() {
     }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '确认修改密码'; }
+  }
+};
+
+// ==================== 个人资料：头像上传 / 移除 / 保存 ====================
+window.onAvatarFilePicked = async function onAvatarFilePicked(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const msg = document.getElementById('profileMsg');
+  const setMsg = (t, color) => { if (msg) { msg.textContent = t; msg.style.color = color || ''; } };
+  setMsg('上传中...', '');
+  const r = await api.auth.uploadAvatar(file);
+  if (r.success) {
+    setMsg('✅ 头像已更新', '#059669');
+    refreshMyProfileDisplay();
+  } else {
+    setMsg('❌ ' + (r.message || '上传失败'), '#dc2626');
+  }
+  input.value = '';   // 允许重复选同一文件触发 onchange
+};
+
+window.clearAvatar = async function clearAvatar() {
+  const msg = document.getElementById('profileMsg');
+  const setMsg = (t, color) => { if (msg) { msg.textContent = t; msg.style.color = color || ''; } };
+  if (!confirm('确定移除当前头像？将恢复为昵称首字母占位。')) return;
+  setMsg('处理中...', '');
+  const r = await api.auth.updateProfile({ avatarUrl: '' });   // 空串 = 清空头像
+  if (r.success) {
+    setMsg('✅ 已移除头像', '#059669');
+    refreshMyProfileDisplay();
+  } else {
+    setMsg('❌ ' + (r.message || '移除失败'), '#dc2626');
+  }
+};
+
+window.doSaveProfile = async function doSaveProfile() {
+  const btn = document.getElementById('saveProfileBtn');
+  const msg = document.getElementById('profileMsg');
+  if (!btn || !msg) return;
+  const nickname = (document.getElementById('nicknameInput').value || '').trim();
+  const bio = (document.getElementById('bioInput').value || '');
+  const urlVal = (document.getElementById('avatarUrlInput').value || '').trim();
+  if (!nickname) { msg.style.color = '#dc2626'; msg.textContent = '❌ 昵称不能为空'; return; }
+  if (nickname.length > 20) { msg.style.color = '#dc2626'; msg.textContent = '❌ 昵称最多 20 字'; return; }
+  if (bio.length > 200) { msg.style.color = '#dc2626'; msg.textContent = '❌ 简介最多 200 字'; return; }
+  if (urlVal && !/^https?:\/\//i.test(urlVal)) { msg.style.color = '#dc2626'; msg.textContent = '❌ 头像链接必须是 http(s) 网址'; return; }
+
+  btn.disabled = true; btn.textContent = '保存中...';
+  msg.textContent = ''; msg.style.color = '';
+  try {
+    // 头像外链留空则不传 → 不会覆盖已上传的 R2 头像
+    const body = { nickname, bio };
+    if (urlVal) body.avatarUrl = urlVal;
+    const r = await api.auth.updateProfile(body);
+    if (r.success) {
+      msg.style.color = '#059669';
+      msg.textContent = '✅ 资料已保存';
+      const urlInput = document.getElementById('avatarUrlInput');
+      if (urlInput) urlInput.value = '';   // 已生效，清空避免重复保存又覆盖
+      refreshMyProfileDisplay();
+    } else {
+      msg.style.color = '#dc2626';
+      msg.textContent = '❌ ' + (r.message || '保存失败');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '保存资料'; }
   }
 };
 

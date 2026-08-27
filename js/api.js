@@ -99,11 +99,12 @@ function setAuth(token, user) {
   }
 }
 
-async function request(path, { method = 'GET', body, needsAuth = true } = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+async function request(path, { method = 'GET', body, needsAuth = true, raw = false } = {}) {
+  const headers = {};
+  if (!raw) headers['Content-Type'] = 'application/json';
   if (needsAuth && tokenCache) headers.Authorization = 'Bearer ' + tokenCache;
   const init = { method, headers };
-  if (body !== undefined) init.body = JSON.stringify(body);
+  if (body !== undefined) init.body = raw ? body : JSON.stringify(body);
 
   const url = API_BASE + path;
   let res;
@@ -176,8 +177,64 @@ export const auth = {
       body: { oldPassword, newPassword, confirmPassword },
     });
   },
+  /**
+   * 修改资料：按字段更新，传哪个字段改哪个，没传的不动。
+   *   { nickname?, bio?, avatarUrl? }
+   *   - avatarUrl 给空串 → 清空头像；不给 → 头像不变（用于只改昵称/简介）
+   *   - avatarUrl 填 http(s) 外链 → 用外链当头像
+   *   R2 上传的头像请用 uploadAvatar，不要走这里
+   */
+  async updateProfile({ nickname, bio, avatarUrl } = {}) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    const body = {};
+    if (nickname !== undefined) body.nickname = nickname;
+    if (bio !== undefined) body.bio = bio;
+    if (avatarUrl !== undefined) body.avatarUrl = avatarUrl;
+    if (Object.keys(body).length === 0) return { success: false, message: '没有需要更新的字段' };
+    const res = await request('/api/auth/me/profile', { method: 'PUT', body });
+    if (res.success && res.data) {
+      userCache = res.data;
+      try { localStorage.setItem(USER_KEY, JSON.stringify(res.data)); } catch {}
+    }
+    return res;
+  },
+  /**
+   * 上传头像到 R2（需 R2 已启用）。成功后后端直接写库，前端刷新即可。
+   * file: File 对象（来自 <input type=file>）
+   */
+  async uploadAvatar(file) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!file) return { success: false, message: '请选择文件' };
+    if (!file.type || !file.type.startsWith('image/')) return { success: false, message: '仅支持图片' };
+    if (file.size > 2 * 1024 * 1024) return { success: false, message: '图片不能超过 2MB' };
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await request('/api/auth/me/avatar', { method: 'POST', body: fd, raw: true });
+    // 上传成功后拉一次最新资料，把 userCache 的 avatarUrl 同步
+    if (res.success) { try { await this.me(); } catch {} }
+    return res;
+  },
   logout() { clearAuth(); },
 };
+
+/**
+ * 把用户资料里的 avatarUrl 字段翻译成 <img src> 能直接用的 URL。
+ *   - R2 上传（'r2:...'）→ 走 Worker 公开取图接口 /api/auth/avatar/:uid
+ *   - http(s) 外链 → 原样返回
+ *   - 没头像 → null（调用方显示首字母占位）
+ * cacheBust：资料更新后避免图片缓存，用 updatedAt/时间戳拼 ?v=
+ */
+export function getAvatarUrl(user) {
+  if (!user || !user.uid) return null;
+  const a = user.avatarUrl;
+  if (!a) return null;
+  if (typeof a === 'string' && a.startsWith('r2:')) {
+    const v = user.updatedAt || user.createdAt || '';
+    return `${API_BASE}/api/auth/avatar/${encodeURIComponent(user.uid)}${v ? ('?v=' + encodeURIComponent(v)) : ''}`;
+  }
+  if (typeof a === 'string' && /^https?:\/\//i.test(a)) return a;
+  return null;
+}
 
 // ======================== 帖子 ========================
 export const posts = {

@@ -203,4 +203,132 @@ auth.patch('/me', requireAuth(), async (c) => {
   }
 });
 
+// ==================== 修改资料（昵称 / 简介 / 头像URL，仅需登录）====================
+// 只更新请求体里出现的字段；avatarUrl 留空串则清空头像，undefined 则不动。
+// 头像优先走 /api/auth/me/avatar 上传到 R2；本接口的 avatarUrl 用于"填外链图片"那条路。
+auth.put('/me/profile', requireAuth(), async (c) => {
+  try {
+    const payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) return fail('无效的 token', 401);
+    const uid = payload.sub;
+
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+
+    const sets = [];      // 动态拼 SET 子句
+    const vals = [];
+    const has = (k) => Object.prototype.hasOwnProperty.call(body, k);
+
+    if (has('nickname')) {
+      const nickname = (body.nickname || '').toString().trim();
+      if (nickname.length < 1 || nickname.length > 20) return fail('昵称 1-20 字');
+      sets.push('nickname = ?'); vals.push(nickname);
+    }
+    if (has('bio')) {
+      const bio = (body.bio || '').toString();
+      if (bio.length > 200) return fail('简介最多 200 字');
+      sets.push('bio = ?'); vals.push(bio || null);
+    }
+    if (has('avatarUrl')) {
+      let avatarUrl = (body.avatarUrl || '').toString().trim();
+      if (avatarUrl) {
+        // 只接受 http(s) 外链；R2 上传的头像由 /me/avatar 接口直接写库（r2: 前缀），不在这里传
+        if (!/^https?:\/\//i.test(avatarUrl)) return fail('头像链接必须是 http(s) 网址');
+        if (avatarUrl.length > 500) return fail('头像链接过长');
+      } else {
+        avatarUrl = null;   // 空串 → 清空头像
+      }
+      sets.push('avatar_url = ?'); vals.push(avatarUrl);
+    }
+
+    if (sets.length === 0) return fail('没有需要更新的字段');
+    sets.push("updated_at = datetime('now')");
+    vals.push(uid);
+
+    const db = c.env.DB;
+    await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE uid = ?`).bind(...vals).run();
+    const row = await db.prepare('SELECT * FROM users WHERE uid = ?').bind(uid).first();
+    return c.json(ok(serializeUser(row), { updatedAt: row && row.updated_at }));
+  } catch (e) {
+    return fail(`[update profile] ${e.name}: ${e.message}`, 500);
+  }
+});
+
+// ==================== 上传头像到 R2（仅需登录）====================
+// multipart/form-data，字段名 file；存为 avatars/<uid>/<时间戳随机>.<ext>
+// 成功后直接把 users.avatar_url 更新为 'r2:<key>'，前端用 GET /api/auth/avatar/:uid 取图。
+auth.post('/me/avatar', requireAuth(), async (c) => {
+  try {
+    if (!c.env || !c.env.AVATARS) {
+      return fail('头像上传未启用：R2 存储未配置（请联系站长启用 R2）', 503);
+    }
+    const payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) return fail('无效的 token', 401);
+    const uid = payload.sub;
+
+    let form;
+    try { form = await c.req.parseBody(); } catch { return fail('请求体解析失败（需 multipart/form-data）'); }
+    const file = form && form.file;
+    if (!file || typeof file.arrayBuffer !== 'function') return fail('缺少文件字段 file');
+
+    const type = (file.type || '').toLowerCase();
+    if (!type.startsWith('image/')) return fail('仅支持图片格式');
+    const MAX = 2 * 1024 * 1024;   // 2MB
+    if (file.size && file.size > MAX) return fail('图片不能超过 2MB');
+
+    // 扩展名：image/png→png, image/jpeg→jpg, image/gif→gif, image/webp→webp, 其它用 subtype
+    const ext = ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' })[type]
+      || (type.split('/')[1] || 'bin');
+
+    const data = await file.arrayBuffer();
+    const ts = Date.now();
+    const rand = Math.random().toString(36).slice(2, 8);
+    const key = `avatars/${uid}/${ts}-${rand}.${ext}`;
+    await c.env.AVATARS.put(key, data, { httpMetadata: { contentType: type || 'image/png' } });
+
+    // 删旧头像（如有），避免 R2 堆积；r2: 前缀的旧 key 才删
+    const db = c.env.DB;
+    const cur = await db.prepare('SELECT avatar_url FROM users WHERE uid = ?').bind(uid).first();
+    const oldKey = cur && typeof cur.avatar_url === 'string' && cur.avatar_url.startsWith('r2:')
+      ? cur.avatar_url.slice(3) : null;
+    await db.prepare("UPDATE users SET avatar_url = ?, updated_at = datetime('now') WHERE uid = ?")
+      .bind(`r2:${key}`, uid).run();
+    if (oldKey && oldKey !== key) {
+      try { await c.env.AVATARS.delete(oldKey); } catch {}
+    }
+    return c.json(ok({ avatarUrl: `r2:${key}` }));
+  } catch (e) {
+    return fail(`[upload avatar] ${e.name}: ${e.message}`, 500);
+  }
+});
+
+// ==================== 公开取头像（无需登录，<img> 直接用）====================
+// GET /api/auth/avatar/:uid
+//   - avatar_url 形如 r2:<key> → 从 R2 流式返回原图
+//   - 形如 http(s) 外链 → 302 跳转
+//   - 无 → 404（前端回退到首字母占位）
+auth.get('/avatar/:uid', async (c) => {
+  try {
+    const uid = (c.req.param('uid') || '').trim();
+    if (!/^\d{1,8}$/.test(uid)) return new Response(null, { status: 404 });
+    const row = await c.env.DB.prepare('SELECT avatar_url FROM users WHERE uid = ?').bind(uid).first();
+    const url = row && row.avatar_url;
+    if (!url) return new Response(null, { status: 404 });
+    if (url.startsWith('r2:')) {
+      if (!c.env || !c.env.AVATARS) return new Response(null, { status: 404 });
+      const key = url.slice(3);
+      const obj = await c.env.AVATARS.get(key);
+      if (!obj) return new Response(null, { status: 404 });
+      const headers = { 'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': '*' };
+      if (obj.httpMetadata && obj.httpMetadata.contentType) headers['Content-Type'] = obj.httpMetadata.contentType;
+      else headers['Content-Type'] = 'image/png';
+      return new Response(obj.body, { headers });
+    }
+    if (/^https?:\/\//i.test(url)) return Response.redirect(url, 302);
+    return new Response(null, { status: 404 });
+  } catch (e) {
+    return new Response(null, { status: 404 });
+  }
+});
+
 export default auth;

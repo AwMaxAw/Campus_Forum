@@ -439,3 +439,20 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 .profile-name { font-size: 20px; font-weight: 600; }
 .profile-uid { opacity: 0.85; font-size: 13px; margin-top: 4px; }
 .profile-bio { margin-top: 8px; opacity: 0.95; font-size: 13px; }
+
+/* ---- 头像图片覆盖层：首字母占位 + 图片绝对覆盖（加载失败 onerror 隐藏 → 露出首字母）---- */
+.avatar-lg { position: relative; overflow: hidden; }
+.avatar-lg .avatar-initials { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.avatar-lg .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---- 个人资料编辑表单 ---- */
+.profile-edit-row { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.profile-edit-avatar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.profile-edit-avatar-actions label.secondary {
+  display: inline-block; cursor: pointer; user-select: none;
+  background: #e5e5e7; color: #1d1d1f;
+  padding: 6px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4;
+  transition: background .15s;
+}
+.profile-edit-avatar-actions label.secondary:hover { background: #dcdce0; }
+.field-label { display: block; font-size: 13px; color: #1d1d1f; margin: 8px 0 4px; font-weight: 500; }
