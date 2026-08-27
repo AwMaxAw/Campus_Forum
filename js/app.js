@@ -49,10 +49,11 @@ function categoryBadgeHtml(key, opts = {}) {
   const label = CATEGORY_LABEL[key] || key;
   const color = CATEGORY_COLOR[key] || '#6b7280';
   const light = toLightBg(color);
-  const onclick = opts.clickable
-    ? `onclick="event.stopPropagation();setHomeFilter('category',${escapeHtml(JSON.stringify(key))})" title="按「${label}」分区筛选" style="cursor:pointer"`
+  const clickAttrs = opts.clickable
+    ? `onclick="event.stopPropagation();setHomeFilter('category',${escapeHtml(JSON.stringify(key))})" title="按「${label}」分区筛选"`
     : '';
-  return `<span ${onclick} style="color:${color};background:${light};padding:1px 8px;border-radius:12px;font-size:12px;margin-right:6px;font-weight:500">${escapeHtml(label)}</span>`;
+  const cursor = opts.clickable ? 'cursor:pointer;' : '';
+  return `<span ${clickAttrs} style="${cursor}color:${color};background:${light};padding:1px 8px;border-radius:12px;font-size:12px;margin-right:6px;font-weight:500">${escapeHtml(label)}</span>`;
 }
 function toLightBg(hex) {
   // #RRGGBB → 250 左右浅色背景（和文字颜色同色相）
