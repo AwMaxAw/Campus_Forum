@@ -746,15 +746,24 @@ async function loadAndRenderComments(postId) {
     const headerAuthor = deleted ? `已删除用户` : escapeHtml(c.authorNickname || `用户${c.authorUid}`);
     const canReply = me && !deleted;
     const canDelete = me && !deleted && (me.uid === c.authorUid || me.role === 'admin' || me.role === 'dev_admin');
+    const canEdit = me && !deleted && (me.role === 'admin' || me.role === 'dev_admin');
 
     return `
       <div class="comment-item ${isReply ? 'reply' : ''}" data-comment-id="${c.id}">
         <div class="comment-header">
           <span><span class="comment-author">${headerAuthor}</span> · ${escapeHtml(formatTime(c.createdAt))}</span>
           ${canDelete ? `<button class="ghost danger-style" onclick="deleteComment(${c.id}, ${postId})" style="color:#ff3b30;background:none">删除</button>` : ''}
+          ${canEdit ? `<button class="ghost" onclick="toggleEditComment(${c.id})" style="color:#2563eb;background:none">编辑</button>` : ''}
         </div>
         ${replyRef}
-        ${contentHtml}
+        <div id="comment-content-${c.id}">${contentHtml}</div>
+        ${canEdit ? `
+          <div class="edit-comment-box" id="edit-comment-${c.id}" style="display:none;margin-top:6px">
+            <textarea placeholder="编辑评论..." maxlength="1000" style="width:100%;min-height:60px;margin-bottom:6px">${escapeHtml(c.content || '')}</textarea>
+            <button onclick="saveEditComment(${c.id}, ${postId}, this)" style="padding:4px 12px;font-size:13px">保存</button>
+            <button class="secondary" onclick="document.getElementById('edit-comment-${c.id}').style.display='none'" style="padding:4px 12px;font-size:13px">取消</button>
+          </div>
+        ` : ''}
         ${canReply ? `
           <div class="comment-actions">
             <button class="ghost" onclick="toggleReplyInput(${c.id})">↩ 回复</button>
@@ -804,6 +813,30 @@ window.deleteComment = async function deleteComment(commentId, postId) {
   const r = await api.comments.remove(commentId);
   if (r.success) loadAndRenderComments(postId);
   else alert(r.message || '删除失败');
+};
+window.toggleEditComment = function toggleEditComment(commentId) {
+  const box = document.getElementById('edit-comment-' + commentId);
+  if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+};
+window.saveEditComment = async function saveEditComment(commentId, postId, btnEl) {
+  const wrap = btnEl.closest('.edit-comment-box');
+  const ta = wrap.querySelector('textarea');
+  const content = (ta.value || '').trim();
+  if (!content) return alert('评论内容不能为空');
+  btnEl.disabled = true; btnEl.textContent = '保存中...';
+  try {
+    const r = await api.comments.update(commentId, content);
+    if (r.success) {
+      // 更新评论内容显示（不重新拉全部）
+      const contentDiv = document.getElementById('comment-content-' + commentId);
+      if (contentDiv) contentDiv.innerHTML = `<div class="comment-content">${escapeHtml(content)}</div>`;
+      wrap.style.display = 'none';
+    } else {
+      alert(r.message || '编辑失败');
+    }
+  } finally {
+    btnEl.disabled = false; btnEl.textContent = '保存';
+  }
 };
 
 // ==================== 视图：个人中心（我的帖 / 我点赞 / 我收藏） ====================

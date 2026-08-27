@@ -163,4 +163,32 @@ comments.delete('/:id', requireAuth(), async (c) => {
   return c.json(ok({ id, hidden: true }));
 });
 
+// ==================== 编辑评论（JWT：仅 admin/dev_admin）====================
+comments.put('/:id', requireAuth(), async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id) || id <= 0) return fail('评论 ID 无效');
+
+    const payload = c.get('jwtPayload');
+    const role = payload && payload.role;
+    const isAdmin = role === 'admin' || role === 'dev_admin';
+    if (!isAdmin) return fail('只有管理员才能编辑评论', 403);
+
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+    const content = (body.content || '').trim();
+    if (!content) return fail('评论内容不能为空');
+    if (content.length > 1000) return fail('评论不能超过 1000 字');
+
+    const db = c.env.DB;
+    const comment = await db.prepare('SELECT * FROM comments WHERE id = ? AND is_hidden = 0').bind(id).first();
+    if (!comment) return fail('评论不存在或已删除', 404);
+
+    await db.prepare("UPDATE comments SET content = ?, updated_at = datetime('now') WHERE id = ?").bind(content, id).run();
+    return c.json(ok({ id, content }));
+  } catch (e) {
+    return fail(`[comments update] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 export default comments;

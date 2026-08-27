@@ -246,6 +246,10 @@ export const comments = {
   async remove(id) {
     return request(`/api/comments/${id}`, { method: 'DELETE' });
   },
+  async update(id, content) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/comments/${id}`, { method: 'PUT', body: { content } });
+  },
 };
 
 // ======================== 点赞 ========================
