@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-cats';
+import * as api from './api.js?v=20260827-route-fix';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -1276,7 +1276,9 @@ window.doPost = async function doPost() {
 // ==================== 路由入口 ====================
 function route() {
   const raw = (location.hash || '').slice(1);
-  const [seg1, seg2] = raw.split('/');
+  // 先剥掉查询串（#forum?cat=study → forum?cat=study → forum），否则带筛选的 hash 会被当成未知路径落到封面页
+  const [pathPart, ...rest] = raw.split('?');
+  const [seg1, seg2] = pathPart.split('/');
   const path = seg1 || 'home';
   const app = document.getElementById('app');
 
