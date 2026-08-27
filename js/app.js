@@ -413,15 +413,15 @@ function renderPost(app) {
 
       <div style="margin-bottom:14px">
         <label for="tagInput" style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
-          🏷 标签（最多 5 个，每个 ≤20 字，回车/逗号/空格确认一个）
+          🏷 标签（最多 5 个，每个 ≤20 字，用 # 分隔）
         </label>
         <div id="tagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
         <input id="tagInput"
-               placeholder="例：高二 / 数学 / 社团招新 / 英语演讲比赛 ……"
-               maxlength="20"
+               placeholder="用 # 分隔标签，例：#高二#数学#社团招新"
+               maxlength="200"
                style="width:100%">
         <p class="hint" style="margin:2px 0 0 0">
-          💡 分区用于大分类（综合/学习/社团/生活/站务），标签用于细分话题，两者可以同时使用一起搜索。
+          💡 输入 # 确认一个标签（最多 5 个，每个 ≤20 字）。分区用于大分类，标签用于细分话题。
         </p>
       </div>
 
@@ -466,10 +466,12 @@ function renderPost(app) {
       });
     });
   }
+  // 标签以 # 为分隔符：用户自己打 # 开头，遇到 # 就分割成新标签
   function addTagFromInput() {
-    const raw = (tagInput.value || '').trim().replace(/^#/, '');
-    // 中文逗号 / 空格 / 顿号 / 英文逗号 / 分号 —— 全部当作分隔符
-    const items = raw.split(/[,，;；、\s\t]+/).map(s => s.trim()).filter(Boolean);
+    const raw = (tagInput.value || '').trim();
+    if (!raw) return false;
+    // 按 # 分割，去掉首尾空格，过滤空串
+    const items = raw.split(/#+/).map(s => s.trim()).filter(Boolean);
     if (items.length === 0) return false;
     for (const it of items) {
       const t = it.slice(0, 20);
@@ -479,11 +481,29 @@ function renderPost(app) {
     renderChips();
     return true;
   }
-  // 回车 / 逗号 / 顿号 / 中文逗号 / 空格 立即确认
+  // 遇到 # 号立即分割（用户每打一个 # 就把前面的文本收为标签）
+  // 回车也确认（把当前输入框残留的最后一个标签收进来）
   tagInput.addEventListener('keydown', e => {
-    if (['Enter', ',', '，', ';', '；', '、', ' '].includes(e.key)) {
-      e.preventDefault();
-      addTagFromInput();
+    if (e.key === '#' || e.key === 'Enter') {
+      // # 号：先把 # 之前的文本提取为标签，再让 # 正常输入（方便用户继续打下一个标签）
+      if (e.key === '#') {
+        const beforeHash = tagInput.value;
+        if (beforeHash) {
+          // 立即把 # 之前的内容提取为标签
+          const items = beforeHash.split(/#+/).map(s => s.trim()).filter(Boolean);
+          for (const it of items) {
+            const t = it.slice(0, 20);
+            if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
+          }
+          tagInput.value = '';
+          renderChips();
+        }
+        // 让 # 正常输入，不打断
+      } else {
+        // 回车：确认全部
+        e.preventDefault();
+        addTagFromInput();
+      }
     } else if (e.key === 'Backspace' && tagInput.value === '' && draftPostTags.length > 0) {
       draftPostTags.pop();
       renderChips();
@@ -1059,8 +1079,8 @@ window.doPost = async function doPost() {
   const tagInput = document.getElementById('tagInput');
   if (tagInput) {
     try {
-      const raw = (tagInput.value || '').trim().replace(/^#/, '');
-      const items = raw.split(/[,，;；、\s\t]+/).map(s => s.trim()).filter(Boolean);
+      const raw = (tagInput.value || '').trim();
+      const items = raw.split(/#+/).map(s => s.trim()).filter(Boolean);
       for (const it of items) {
         const t = it.slice(0, 20);
         if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
