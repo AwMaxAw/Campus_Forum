@@ -29,6 +29,11 @@ a:hover { text-decoration: underline; }
 .topbar h1 a:hover { text-decoration: none; }
 .topbar-nav {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  flex: 1; min-width: 0;
+}
+.nav-right-group {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: auto;
 }
 .user-nickname { margin: 0 8px; font-weight: 500; }
 .unread-badge {

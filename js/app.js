@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-reg-gap';
+import * as api from './api.js?v=20260827-nav-layout';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -98,16 +98,20 @@ async function renderTopBar() {
       <button class="ghost" onclick="location.hash='about'">ℹ️ 关于本站</button>
       ${(me.role === 'admin' || me.role === 'dev_admin')
         ? `<button class="ghost" onclick="location.hash='admin'" style="color:#b45309">🛡 管理员面板</button>` : ''}
-      <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
-      <button class="secondary" onclick="doLogout()">退出</button>
+      <span class="nav-right-group">
+        <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
+        <button class="secondary" onclick="doLogout()">退出</button>
+      </span>
     `;
   } else {
     nav.innerHTML = `
       <button class="ghost" onclick="location.hash='home'">🏠 首页</button>
       <button class="ghost" onclick="location.hash='announcements'">📢 公告</button>
       <button class="ghost" onclick="location.hash='about'">ℹ️ 关于本站</button>
-      <button class="secondary" onclick="location.hash='register'">注册</button>
-      <button class="secondary" onclick="location.hash='login'">登录</button>
+      <span class="nav-right-group">
+        <button class="secondary" onclick="location.hash='register'">注册</button>
+        <button class="secondary" onclick="location.hash='login'">登录</button>
+      </span>
     `;
   }
 }
