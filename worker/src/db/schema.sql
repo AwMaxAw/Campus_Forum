@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'member',      -- member / admin / dev_admin
   avatar_url TEXT,
   bio TEXT,                                -- 简介
+  is_banned INTEGER NOT NULL DEFAULT 0,    -- 0/1，是否被管理员封禁（封禁后无法登录）
+  last_login_at TEXT,                       -- 上次最后登录时间（登录成功时更新；为兼容 D1 ADD COLUMN，不带 NOT NULL）
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT                          -- 最后修改时间（改密码 / 改资料时更新；为兼容 D1 ADD COLUMN，不带 NOT NULL 与不稳定 DEFAULT）
 );

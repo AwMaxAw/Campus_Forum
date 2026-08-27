@@ -115,8 +115,10 @@ auth.post('/login', async (c) => {
     const pwOk = await verifyPassword(password, user.password_hash);
     if (!pwOk) return fail(genericMsg, 401);
 
-    // 被软删/封禁？扩展字段先预留着，现在不启用
-    // if (user.is_banned) return fail('账号已被封禁', 403);
+    // 被封禁？拒绝登录
+    if (user.is_banned) {
+      return fail('该账号已被管理员封禁，如有疑问请联系管理员申诉', 403);
+    }
 
     const now = Math.floor(Date.now() / 1000);
     const payload = {
@@ -126,6 +128,13 @@ auth.post('/login', async (c) => {
       exp: now + JWT_TTL_SEC,
     };
     const token = await sign(payload, c.env.JWT_SECRET, 'HS256');
+
+    // 登录成功 → 更新 last_login_at（失败不阻塞主流程）
+    try {
+      await db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE uid = ?").bind(user.uid).run();
+    } catch (e) {
+      console.warn('[login] 更新 last_login_at 失败（可忽略）：', e && e.message);
+    }
 
     return c.json(ok(serializeUser(user), {
       token,

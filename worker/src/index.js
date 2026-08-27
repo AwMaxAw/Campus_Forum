@@ -74,21 +74,36 @@ app.route('/api/messages', messagesRoutes);
 app.route('/api/announcements', announcementsRoutes);
 app.route('/api/admin', adminRoutes);
 
-// ============ 轻量自迁移：首次请求时给老库补 pin_order 列（schema.sql 已含该列，仅兼容旧部署）============
+// ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
-let pinOrderMigrated = false;
+let autoMigrated = false;
 app.use('*', async (c, next) => {
-  if (!pinOrderMigrated && c.env && c.env.DB) {
-    pinOrderMigrated = true;
+  if (!autoMigrated && c.env && c.env.DB) {
+    autoMigrated = true;
     try {
-      const r = await c.env.DB
+      // posts.pin_order
+      const r1 = await c.env.DB
         .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('posts') WHERE name='pin_order'")
         .first();
-      if (r && r.c === 0) {
+      if (r1 && r1.c === 0) {
         await c.env.DB.prepare('ALTER TABLE posts ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0').run();
       }
+      // users.is_banned
+      const r2 = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='is_banned'")
+        .first();
+      if (r2 && r2.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE users ADD COLUMN is_banned INTEGER NOT NULL DEFAULT 0').run();
+      }
+      // users.last_login_at
+      const r3 = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='last_login_at'")
+        .first();
+      if (r3 && r3.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE users ADD COLUMN last_login_at TEXT').run();
+      }
     } catch (e) {
-      console.warn('[migrate] pin_order 检查/添加失败（可忽略，可能列已存在）：', e && e.message);
+      console.warn('[migrate] 自动迁移失败（可忽略，可能列已存在）：', e && e.message);
     }
   }
   await next();

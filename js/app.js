@@ -1306,37 +1306,89 @@ async function renderAdmin(app) {
     </div>
   `;
 
-  // --- 板块1：账号列表 ---
-  (async () => {
-    const host = document.getElementById('adminUsers');
-    try {
+  // --- 板块1：账号列表（含最后登录时间 / 状态 / 注销·封禁操作）---
+  renderAdminUsers(document.getElementById('adminUsers'));
       const r = await api.admin.listUsers();
       if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
       const users = r.data || [];
       if (users.length === 0) { host.innerHTML = `<span class="hint">暂无注册账号</span>`; return; }
+
+      const me = api.getCurrentUser();       // 当前登录的管理员（用于禁止自我操作）
+      const myUid = me && me.uid;
+      const myRole = me && me.role;
+
       host.innerHTML = `
-        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${users.length} 个账号</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
         <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead><tr style="text-align:left;color:#6b7280;border-bottom:1px solid #e5e7eb">
-              <th style="padding:6px 8px">UID</th>
-              <th style="padding:6px 8px">昵称</th>
-              <th style="padding:6px 8px">角色</th>
-              <th style="padding:6px 8px">帖子数</th>
-              <th style="padding:6px 8px">注册时间</th>
+          <table class="admin-table">
+            <thead><tr>
+              <th>UID</th>
+              <th>昵称</th>
+              <th>角色</th>
+              <th>帖子数</th>
+              <th>注册时间</th>
+              <th>最后登录</th>
+              <th>状态</th>
+              <th>操作</th>
             </tr></thead>
             <tbody>
-              ${users.map(u => `<tr style="border-bottom:1px solid #f3f4f6">
-                <td style="padding:6px 8px">${escapeHtml(u.uid)}</td>
-                <td style="padding:6px 8px">${escapeHtml(u.nickname)}</td>
-                <td style="padding:6px 8px">${u.role === 'dev_admin' ? '开发管理员' : u.role === 'admin' ? '管理员' : '普通成员'}</td>
-                <td style="padding:6px 8px">${u.postCount}</td>
-                <td style="padding:6px 8px">${escapeHtml(formatTime(u.createdAt))}</td>
-              </tr>`).join('')}
+              ${users.map(u => {
+                const isMe = u.uid === myUid;
+                const isDevAdmin = u.role === 'dev_admin';
+                const isAdmin = u.role === 'admin' || isDevAdmin;
+                // 权限规则（前端预判，后端会再校验）：
+                //   - 不能封禁/注销自己
+                //   - 普通管理员不能封禁/注销其他管理员（只有 dev_admin 才行）
+                //   - dev_admin 账号永远不能被注销（即使另一个 dev_admin 也不行）
+                const canBan   = !isMe && (!isAdmin || myRole === 'dev_admin');
+                const canUnban = !isMe && u.isBanned && (!isAdmin || myRole === 'dev_admin');
+                const canDelete = !isMe && !isDevAdmin && (!isAdmin || myRole === 'dev_admin');
+
+                const banBtn = u.isBanned
+                  ? (canUnban
+                      ? `<button class="btn-mini btn-success" data-act="unban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">解封</button>`
+                      : `<span class="hint" style="margin:0">—</span>`)
+                  : (canBan
+                      ? `<button class="btn-mini btn-danger" data-act="ban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">封禁</button>`
+                      : `<span class="hint" style="margin:0">—</span>`);
+                const delBtn = canDelete
+                  ? `<button class="btn-mini btn-warning" data-act="delete" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-posts="${u.postCount || 0}">注销</button>`
+                  : (isMe ? `<span class="hint" style="margin:0" title="不能注销自己">本人</span>` : `<span class="hint" style="margin:0" title="该账号受保护">—</span>`);
+
+                const statusBadge = u.isBanned
+                  ? `<span class="status-badge status-banned">已封禁</span>`
+                  : `<span class="status-badge status-normal">正常</span>`;
+                const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
+                const roleText = isDevAdmin ? '开发管理员' : isAdmin ? '管理员' : '普通成员';
+                const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
+
+                return `<tr>
+                  <td>${escapeHtml(u.uid)}</td>
+                  <td>${escapeHtml(u.nickname)}${selfTag}</td>
+                  <td>${roleText}</td>
+                  <td>${u.postCount || 0}</td>
+                  <td>${escapeHtml(formatTime(u.createdAt))}</td>
+                  <td>${lastLogin}</td>
+                  <td>${statusBadge}</td>
+                  <td class="action-cell">${banBtn}${delBtn}</td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
       `;
+      // 事件委托：所有 操作按钮 统一走二次确认
+      host.querySelectorAll('[data-act]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const act = btn.dataset.act;
+          const uid = btn.dataset.uid;
+          const nick = btn.dataset.nick;
+          const posts = btn.dataset.posts;
+          if (act === 'ban')    confirmBan(uid, nick);
+          if (act === 'unban')  confirmUnban(uid, nick);
+          if (act === 'delete') confirmDelete(uid, nick, posts);
+        });
+      });
     } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
   })();
 

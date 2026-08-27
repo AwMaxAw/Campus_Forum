@@ -346,4 +346,22 @@ export const admin = {
     if (!tokenCache) return { success: false, message: '请先登录' };
     return request('/api/admin/tags');
   },
+  /** 封禁账号（危险操作，前端需二次确认） */
+  async banUser(uid) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!uid) return { success: false, message: '缺少 uid' };
+    return request(`/api/admin/users/${encodeURIComponent(uid)}/ban`, { method: 'POST' });
+  },
+  /** 解封账号 */
+  async unbanUser(uid) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!uid) return { success: false, message: '缺少 uid' };
+    return request(`/api/admin/users/${encodeURIComponent(uid)}/unban`, { method: 'POST' });
+  },
+  /** 注销账号（物理删除，危险操作，前端需二次确认） */
+  async deleteUser(uid) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!uid) return { success: false, message: '缺少 uid' };
+    return request(`/api/admin/users/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+  },
 };
