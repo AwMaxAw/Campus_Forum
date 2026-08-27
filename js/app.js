@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-multi-tag';
+import * as api from './api.js?v=20260827-about';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -95,6 +95,7 @@ async function renderTopBar() {
       <button class="ghost" onclick="location.hash='messages'">
         💬 私信${unreadMsg ? `<span class="unread-badge">${unreadMsg}</span>` : ''}
       </button>
+      <button class="ghost" onclick="location.hash='about'">ℹ️ 关于本站</button>
       ${(me.role === 'admin' || me.role === 'dev_admin')
         ? `<button class="ghost" onclick="location.hash='admin'" style="color:#b45309">🛡 管理员面板</button>` : ''}
       <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
@@ -104,6 +105,7 @@ async function renderTopBar() {
     nav.innerHTML = `
       <button class="ghost" onclick="location.hash='home'">🏠 首页</button>
       <button class="ghost" onclick="location.hash='announcements'">📢 公告</button>
+      <button class="ghost" onclick="location.hash='about'">ℹ️ 关于本站</button>
       <button class="secondary" onclick="location.hash='register'">注册</button>
       <button class="secondary" onclick="location.hash='login'">登录</button>
     `;
@@ -226,6 +228,80 @@ function renderCover(app) {
     <!-- 动画占位区：后续放首页动画效果 -->
     <div id="coverAnimation" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:#c4c4c8;font-size:14px">
       🎬 动画效果开发中…
+    </div>
+  `;
+}
+
+// ==================== 视图：关于本站（免责声明 / 法律风险规避）====================
+function renderAbout(app) {
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600">ℹ️ 关于本站</span></div>
+
+    <div class="card">
+      <h3 style="margin-top:0">一、站点性质</h3>
+      <p>本论坛（以下简称"本站"）由五中学生个人利用课余时间自发搭建与维护，属于<strong>非官方、非营利性</strong>的校园交流尝试。<strong>本站与广州市第五中学（以下简称"学校"）及其任何下属机构、社团、师生组织均无隶属、代理、合作或赞助关系</strong>，不代表学校立场，亦未获学校授权。站点名称中涉及"五中"字样仅为限定讨论圈层，不构成对学校名称权的主张。</p>
+      <p>本站所有内容均由注册用户自行发布，<strong>本站及管理员仅提供信息存储与传输服务，不参与内容的编辑、采纳或背书</strong>。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">二、用户责任与行为规范</h3>
+      <p>用户在注册及使用本站时，即视为<strong>已阅读、理解并同意</strong>本声明全部条款。用户须对自己的言论与发布行为承担<strong>全部法律责任</strong>，包括但不限于民事、行政及刑事责任。</p>
+      <p>用户<strong>不得</strong>在本站发布、传播下列内容：</p>
+      <ul>
+        <li>违反宪法或法律、行政法规的；</li>
+        <li>危害国家安全、泄露国家秘密、颠覆政权、破坏社会稳定的；</li>
+        <li>煽动民族仇恨、民族歧视、破坏民族团结的；</li>
+        <li>含有谣言、虚假信息、诈骗或教唆犯罪内容的；</li>
+        <li>侮辱、诽谤他人，侵害他人名誉权、肖像权、隐私权等人格权的；</li>
+        <li><strong>涉及他人真实姓名、学号、班级、电话、住址、身份证号等个人隐私信息的</strong>（无论是否本人同意，均不予允许）；</li>
+        <li>含有淫秽、色情、暴力、恐怖或教唆未成年人不良行为的；</li>
+        <li>侵犯他人知识产权、商业秘密或其他合法权益的；</li>
+        <li>其他法律法规禁止或本站规则不允许的内容。</li>
+      </ul>
+      <p>用户发布上述内容的，<strong>由用户自行承担全部法律后果</strong>，本站不承担任何连带责任；本站有权在不通知的情况下删除违规内容、限制或封禁账号，并<strong>配合有权机关的调查与取证</strong>。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">三、内容免责</h3>
+      <p>本站<strong>不对任何用户内容的真实性、准确性、完整性、合法性作出任何保证或承诺</strong>。用户不应据本站内容作出任何决定，因信赖本站内容而产生的任何损失，由用户自行承担。</p>
+      <p>本站转载、存储的用户内容，<strong>不意味着本站赞同其观点或证实其描述</strong>。文责由发布者自负。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">四、侵权投诉与处理</h3>
+      <p>若您认为本站任何内容侵犯您的合法权益（包括但不限于著作权、名誉权、隐私权等），请通过本站私信联系管理员，并提供：</p>
+      <ul>
+        <li>权利人的身份证明及联系方式；</li>
+        <li>主张被侵权的内容链接或帖子标题；</li>
+        <li>初步的权属证明及侵权说明。</li>
+      </ul>
+      <p>管理员将在合理时间内<strong>核实并删除涉嫌侵权的内容</strong>。本站在收到合格通知后，将依法依规采取必要措施，并<strong>不承担事先审查义务</strong>。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">五、服务变更与中断</h3>
+      <p>本站基于第三方云服务（如 Cloudflare、Vercel/Netlify 等）运行，<strong>不保证服务持续可用、稳定或无故障</strong>。因服务器、网络、第三方平台、不可抗力等原因导致的服务中断、数据丢失或异常，本站<strong>不承担赔偿或恢复责任</strong>。</p>
+      <p>本站有权<strong>随时修改、暂停或终止</strong>部分或全部服务，无需事先通知，且不承担任何责任。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">六、未成年人保护</h3>
+      <p>本站面向中学生群体，用户<strong>大多为未成年人</strong>。请用户在监护人指导下使用，<strong>不得泄露本人或他人隐私</strong>，遇到不良信息或不当接触请立即告知监护人并联系管理员处理。本站将优先处置涉及未成年人的违规内容。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">七、知识产权</h3>
+      <p>用户发布的内容，著作权归原作者所有。用户在本站发布内容，即视为<strong>授予本站免费的、非独占的、在全球范围内的存储、展示、传播及为维护站点必要而进行复制与改编的权利</strong>，但不改变著作权归属。</p>
+      <p>本站页面的版式、代码、图标等设计元素，归本站开发者所有，未经许可不得复制或用于其他站点。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">八、免责声明的修改</h3>
+      <p>本站有权<strong>随时修订本声明</strong>，修订后的声明自在本站公布之日起生效，用户继续使用本站即视为接受修订内容。请定期查阅本页。</p>
+    </div>
+
+    <div class="card" style="background:#fef3c7;border:1px solid #fde68a">
+      <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ 特别提示：</strong>继续访问或使用本站任何功能，即视为您已充分阅读、理解并自愿接受本声明全部条款，并自愿承担相应风险与责任。如您不同意，请立即停止使用并关闭本页。</p>
     </div>
   `;
 }
@@ -1546,6 +1622,7 @@ function route() {
   else if (path === 'me') renderMe(app);
   else if (path === 'messages') renderMessages(app);
   else if (path === 'announcements') renderAnnouncements(app);
+  else if (path === 'about') renderAbout(app);
   else if (path === 'admin') renderAdmin(app);
   else if (path === 'forum') renderForum(app);
   else renderCover(app);
