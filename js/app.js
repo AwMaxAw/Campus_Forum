@@ -193,13 +193,6 @@ async function renderHome(app) {
          <p>这是一个由五中学生维护的校园论坛。你可以：</p>
          <p>📌 还没有账号？<a href="#register">去注册（只要 8 位 UID + 密码）</a></p>
          <p>🔑 已有账号？<a href="#login">直接登录</a></p>
-       </div>
-       <div class="card">
-         <h3>技术栈</h3>
-         <p>✅ 前端：Vercel / Netlify 托管的纯 HTML + 原生 JS</p>
-         <p>✅ 后端：Cloudflare Worker + D1（零服务器成本）</p>
-         <p>✅ 密码：PBKDF2-HMAC-SHA-256 哈希（Web Crypto 内置，不裸存）</p>
-         <p>✅ 认证：JWT（HMAC-SHA-256，7 天有效期）</p>
        </div>`
     : `<div class="toolbar">
          <span id="postCount">读取中...</span>
