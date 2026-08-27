@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS posts (
   like_count INTEGER NOT NULL DEFAULT 0,
   comment_count INTEGER NOT NULL DEFAULT 0,
   is_pinned INTEGER NOT NULL DEFAULT 0,    -- 0/1，是否置顶
+  pin_order INTEGER NOT NULL DEFAULT 0,    -- 置顶排序：is_pinned=1 时生效，越小越靠前；多个置顶帖按此值升序排列
   is_hidden INTEGER NOT NULL DEFAULT 0,    -- 0/1，是否被管理员隐藏
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),

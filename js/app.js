@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-edit-pin';
+import * as api from './api.js?v=20260827-admin-panel';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -95,6 +95,8 @@ async function renderTopBar() {
       <button class="ghost" onclick="location.hash='messages'">
         💬 私信${unreadMsg ? `<span class="unread-badge">${unreadMsg}</span>` : ''}
       </button>
+      ${(me.role === 'admin' || me.role === 'dev_admin')
+        ? `<button class="ghost" onclick="location.hash='admin'" style="color:#b45309">🛡 管理员面板</button>` : ''}
       <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
       <button class="secondary" onclick="doLogout()">退出</button>
     `;
@@ -1109,6 +1111,181 @@ async function renderAnnouncements(app) {
   }
 }
 
+// ==================== 视图：管理员面板 ====================
+// 置顶帖顺序调整的本地状态
+let _adminPinPosts = [];   // 后端返回的置顶帖完整数据
+let _adminPinOrder = [];   // 当前顺序：帖子 id 数组（操作后可能偏离服务端顺序，点保存才落库）
+
+async function renderAdmin(app) {
+  const me = api.getCurrentUser();
+  if (!api.isLoggedIn() || (me && me.role !== 'admin' && me.role !== 'dev_admin')) {
+    app.innerHTML = `<div class="card">⛔ 仅管理员可访问该面板。<br><a href="#login">去登录</a> 或 <a href="#forum">返回广场</a></div>`;
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#b45309">🛡 管理员面板</span></div>
+
+    <!-- 板块1：已注册账号 -->
+    <div class="card">
+      <h3 style="margin-top:0">👤 已注册账号</h3>
+      <div id="adminUsers">🔄 加载中...</div>
+    </div>
+
+    <!-- 板块2：分区与标签 -->
+    <div class="card">
+      <h3 style="margin-top:0">📂 分区与标签</h3>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:6px">分区（系统枚举，meta 仅管理员可发帖）：</div>
+      <div id="adminCats"></div>
+      <div style="font-size:12px;color:#6b7280;margin:12px 0 6px">全量标签（按出现次数降序）：</div>
+      <div id="adminTags">🔄 加载标签中...</div>
+    </div>
+
+    <!-- 板块3：置顶帖顺序调整 -->
+    <div class="card">
+      <h3 style="margin-top:0">📌 置顶帖顺序调整</h3>
+      <p class="hint">多个置顶帖按下方顺序排列，越靠前越优先显示在列表顶部。用 ↑↓ 调整顺序后点「保存顺序」生效。</p>
+      <div id="adminPinned">🔄 加载中...</div>
+    </div>
+  `;
+
+  // --- 板块1：账号列表 ---
+  (async () => {
+    const host = document.getElementById('adminUsers');
+    try {
+      const r = await api.admin.listUsers();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const users = r.data || [];
+      if (users.length === 0) { host.innerHTML = `<span class="hint">暂无注册账号</span>`; return; }
+      host.innerHTML = `
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${users.length} 个账号</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="text-align:left;color:#6b7280;border-bottom:1px solid #e5e7eb">
+              <th style="padding:6px 8px">UID</th>
+              <th style="padding:6px 8px">昵称</th>
+              <th style="padding:6px 8px">角色</th>
+              <th style="padding:6px 8px">帖子数</th>
+              <th style="padding:6px 8px">注册时间</th>
+            </tr></thead>
+            <tbody>
+              ${users.map(u => `<tr style="border-bottom:1px solid #f3f4f6">
+                <td style="padding:6px 8px">${escapeHtml(u.uid)}</td>
+                <td style="padding:6px 8px">${escapeHtml(u.nickname)}</td>
+                <td style="padding:6px 8px">${u.role === 'dev_admin' ? '开发管理员' : u.role === 'admin' ? '管理员' : '普通成员'}</td>
+                <td style="padding:6px 8px">${u.postCount}</td>
+                <td style="padding:6px 8px">${escapeHtml(formatTime(u.createdAt))}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块2：分区（静态枚举）+ 标签（异步全量）---
+  const catsHost = document.getElementById('adminCats');
+  catsHost.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">
+    ${CATEGORIES.map(c => `<span style="color:${c.cssColor};background:${toLightBg(c.cssColor)};padding:2px 10px;border-radius:12px;font-size:12px" title="${escapeHtml(c.description||'')}">${escapeHtml(c.label)}${c.adminOnly?' 🔒':''}</span>`).join('')}
+  </div>`;
+  (async () => {
+    const host = document.getElementById('adminTags');
+    try {
+      const r = await api.admin.allTags();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const tags = r.data || [];
+      if (tags.length === 0) { host.innerHTML = `<span class="hint">暂无标签</span>`; return; }
+      host.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${tags.map(t => `<span class="tag-chip">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`).join('')}
+      </div>`;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块3：置顶帖顺序 ---
+  (async () => {
+    try {
+      const r = await api.admin.pinnedPosts();
+      if (!r.success) { document.getElementById('adminPinned').innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      _adminPinPosts = r.data || [];
+      _adminPinOrder = _adminPinPosts.map(p => p.id);
+      renderAdminPinList();
+    } catch (e) { document.getElementById('adminPinned').innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+}
+
+function renderAdminPinList() {
+  const host = document.getElementById('adminPinned');
+  if (!host) return;
+  if (_adminPinOrder.length === 0) {
+    host.innerHTML = `<div class="hint">目前没有置顶帖。可在帖子详情页用「编辑帖子」面板里的置顶开关来置顶。</div>`;
+    return;
+  }
+  const byId = new Map(_adminPinPosts.map(p => [p.id, p]));
+  host.innerHTML = `
+    <div id="adminPinRows">
+      ${_adminPinOrder.map((id, idx) => {
+        const p = byId.get(id) || { id, title: '(该帖已不存在)', category: '' };
+        const isFirst = idx === 0;
+        const isLast = idx === _adminPinOrder.length - 1;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;background:#fffbeb">
+          <span style="font-weight:700;color:#b45309;min-width:24px;text-align:center">${idx + 1}</span>
+          ${categoryBadgeHtml(p.category)}
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
+          <button class="ghost" ${isFirst ? 'disabled' : ''} onclick="window._adminPinMove(${id},-1)" style="padding:2px 10px">↑</button>
+          <button class="ghost" ${isLast ? 'disabled' : ''} onclick="window._adminPinMove(${id},1)" style="padding:2px 10px">↓</button>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <button onclick="window._adminPinSave()">💾 保存顺序</button>
+      <button class="secondary" onclick="window._adminPinReset()">↩ 重置</button>
+      <span id="adminPinMsg" style="font-size:13px"></span>
+    </div>
+  `;
+}
+
+window._adminPinMove = function _adminPinMove(id, dir) {
+  const idx = _adminPinOrder.indexOf(id);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= _adminPinOrder.length) return;
+  [_adminPinOrder[idx], _adminPinOrder[newIdx]] = [_adminPinOrder[newIdx], _adminPinOrder[idx]];
+  renderAdminPinList();
+};
+window._adminPinReset = async function _adminPinReset() {
+  const r = await api.admin.pinnedPosts();
+  if (r.success) {
+    _adminPinPosts = r.data || [];
+    _adminPinOrder = _adminPinPosts.map(p => p.id);
+    renderAdminPinList();
+    const m = document.getElementById('adminPinMsg'); if (m) { m.textContent = '已重置为服务端顺序'; m.style.color = '#6b7280'; }
+  }
+};
+window._adminPinSave = async function _adminPinSave() {
+  const msg = document.getElementById('adminPinMsg');
+  if (msg) { msg.textContent = '保存中...'; msg.style.color = '#6b7280'; }
+  try {
+    const r = await api.admin.updatePinOrder(_adminPinOrder);
+    if (r.success) {
+      // 保存后重新拉取确认（后端会按 pin_order 重排）
+      const rr = await api.admin.pinnedPosts();
+      if (rr.success) {
+        _adminPinPosts = rr.data || [];
+        _adminPinOrder = _adminPinPosts.map(p => p.id);
+      }
+      renderAdminPinList();
+      const m = document.getElementById('adminPinMsg');
+      if (m) { m.textContent = '✅ 顺序已保存'; m.style.color = '#059669'; }
+    } else {
+      const m = document.getElementById('adminPinMsg');
+      if (m) { m.textContent = `❌ ${r.message || '保存失败'}`; m.style.color = '#dc2626'; }
+    }
+  } catch (e) {
+    const m = document.getElementById('adminPinMsg');
+    if (m) { m.textContent = `❌ ${e.message}`; m.style.color = '#dc2626'; }
+  }
+};
+
 // ==================== 登录后：未读公告逐条弹窗 ====================
 async function popupUnreadAnnouncements() {
   if (!api.isLoggedIn()) return;
@@ -1306,6 +1483,7 @@ function route() {
   else if (path === 'me') renderMe(app);
   else if (path === 'messages') renderMessages(app);
   else if (path === 'announcements') renderAnnouncements(app);
+  else if (path === 'admin') renderAdmin(app);
   else if (path === 'forum') renderForum(app);
   else renderCover(app);
 }

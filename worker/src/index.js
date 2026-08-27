@@ -46,6 +46,7 @@ import likesRoutes from './routes/likes.js';
 import favoritesRoutes from './routes/favorites.js';
 import messagesRoutes from './routes/messages.js';
 import announcementsRoutes from './routes/announcements.js';
+import adminRoutes from './routes/admin.js';
 
 const app = new Hono();
 
@@ -71,6 +72,27 @@ app.route('/api/likes', likesRoutes);
 app.route('/api/favorites', favoritesRoutes);
 app.route('/api/messages', messagesRoutes);
 app.route('/api/announcements', announcementsRoutes);
+app.route('/api/admin', adminRoutes);
+
+// ============ 轻量自迁移：首次请求时给老库补 pin_order 列（schema.sql 已含该列，仅兼容旧部署）============
+// 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
+let pinOrderMigrated = false;
+app.use('*', async (c, next) => {
+  if (!pinOrderMigrated && c.env && c.env.DB) {
+    pinOrderMigrated = true;
+    try {
+      const r = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('posts') WHERE name='pin_order'")
+        .first();
+      if (r && r.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE posts ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0').run();
+      }
+    } catch (e) {
+      console.warn('[migrate] pin_order 检查/添加失败（可忽略，可能列已存在）：', e && e.message);
+    }
+  }
+  await next();
+});
 
 app.get('/api/health', (c) => {
   return c.json({

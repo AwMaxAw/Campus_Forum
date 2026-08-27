@@ -317,3 +317,28 @@ export const announcements = {
     return request('/api/announcements', { method: 'POST', body: { title, content, is_pinned: !!isPinned } });
   },
 };
+
+// ======================== 管理员面板（仅 admin/dev_admin，后端再校验角色）========================
+export const admin = {
+  /** 列出所有已注册账号（含每用户帖子数） */
+  async listUsers() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin/users');
+  },
+  /** 列出所有置顶帖（按 pin_order 升序） */
+  async pinnedPosts() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin/pinned-posts');
+  },
+  /** 批量调整置顶帖顺序：order 为帖子 id 数组，顺序即新 pin_order(1,2,3...) */
+  async updatePinOrder(order) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!Array.isArray(order)) return { success: false, message: 'order 必须是数组' };
+    return request('/api/admin/pin-order', { method: 'POST', body: { order } });
+  },
+  /** 全量标签及出现次数 */
+  async allTags() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin/tags');
+  },
+};

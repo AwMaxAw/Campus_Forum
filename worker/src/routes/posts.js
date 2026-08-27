@@ -55,6 +55,7 @@ function mapPostRow(row) {
     likeCount: row.like_count,
     commentCount: row.comment_count,
     isPinned: !!row.is_pinned,
+    pinOrder: row.pin_order != null ? row.pin_order : 0,
     isHidden: !!row.is_hidden,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -112,8 +113,8 @@ posts.get('/', async (c) => {
     const total = countResult.c;
 
     const orderSQL = sortBy === 'hot'
-      ? 'p.is_pinned DESC, (p.like_count * 3 + p.comment_count * 2 + p.view_count) DESC, p.created_at DESC'
-      : 'p.is_pinned DESC, p.created_at DESC';
+      ? 'p.is_pinned DESC, p.pin_order ASC, (p.like_count * 3 + p.comment_count * 2 + p.view_count) DESC, p.created_at DESC'
+      : 'p.is_pinned DESC, p.pin_order ASC, p.created_at DESC';
 
     const rows = await db
       .prepare(
@@ -280,12 +281,17 @@ posts.post('/', requireAuth(), async (c) => {
     if (content.length > 2000) return fail('内容不能超过 2000 字');
     if (cleanTags.some(t => /["'\\<>{}]/.test(t))) return fail('标签不能包含特殊字符');
 
-    // 置顶：仅管理员可在发帖时直接置顶
+    // 置顶：仅管理员可在发帖时直接置顶；置顶帖自动排到现有置顶队列末尾（pin_order = MAX+1）
     const isPinned = isAdmin && !!body.isPinned;
+    let pinOrder = 0;
+    if (isPinned) {
+      const maxRow = await db.prepare('SELECT COALESCE(MAX(pin_order),0) AS m FROM posts WHERE is_pinned = 1').first();
+      pinOrder = (maxRow && maxRow.m ? maxRow.m : 0) + 1;
+    }
 
     const result = await db
-      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, is_pinned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
-      .bind(uid, title, content, category, tagsStr, isPinned ? 1 : 0)
+      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, is_pinned, pin_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
+      .bind(uid, title, content, category, tagsStr, isPinned ? 1 : 0, pinOrder)
       .run();
 
     const postId = result && result.meta && typeof result.meta.last_row_id === 'number'
@@ -412,11 +418,18 @@ posts.patch('/:id/pin', requireAuth(), async (c) => {
     const isPinned = !!body.isPinned;
 
     const db = c.env.DB;
-    const post = await db.prepare('SELECT id FROM posts WHERE id = ? AND is_hidden = 0').bind(id).first();
+    const post = await db.prepare('SELECT id, is_pinned FROM posts WHERE id = ? AND is_hidden = 0').bind(id).first();
     if (!post) return fail('帖子不存在或已删除', 404);
 
-    await db.prepare('UPDATE posts SET is_pinned = ?, updated_at = datetime(\'now\') WHERE id = ?').bind(isPinned ? 1 : 0, id).run();
-    return c.json(ok({ id, isPinned }));
+    // 置顶：放到现有置顶队列末尾（pin_order = MAX+1）；取消置顶：清零 pin_order
+    let pinOrder = 0;
+    if (isPinned) {
+      const maxRow = await db.prepare('SELECT COALESCE(MAX(pin_order),0) AS m FROM posts WHERE is_pinned = 1').first();
+      pinOrder = (maxRow && maxRow.m ? maxRow.m : 0) + 1;
+    }
+    await db.prepare("UPDATE posts SET is_pinned = ?, pin_order = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(isPinned ? 1 : 0, pinOrder, id).run();
+    return c.json(ok({ id, isPinned, pinOrder }));
   } catch (e) {
     return fail(`[posts pin] ${e.name}: ${e.message}`, 500);
   }
