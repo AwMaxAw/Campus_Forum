@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-drawer';
+import * as api from './api.js?v=20260827-admin';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -1308,89 +1308,6 @@ async function renderAdmin(app) {
 
   // --- 板块1：账号列表（含最后登录时间 / 状态 / 注销·封禁操作）---
   renderAdminUsers(document.getElementById('adminUsers'));
-      const r = await api.admin.listUsers();
-      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
-      const users = r.data || [];
-      if (users.length === 0) { host.innerHTML = `<span class="hint">暂无注册账号</span>`; return; }
-
-      const me = api.getCurrentUser();       // 当前登录的管理员（用于禁止自我操作）
-      const myUid = me && me.uid;
-      const myRole = me && me.role;
-
-      host.innerHTML = `
-        <div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
-        <div style="overflow-x:auto">
-          <table class="admin-table">
-            <thead><tr>
-              <th>UID</th>
-              <th>昵称</th>
-              <th>角色</th>
-              <th>帖子数</th>
-              <th>注册时间</th>
-              <th>最后登录</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr></thead>
-            <tbody>
-              ${users.map(u => {
-                const isMe = u.uid === myUid;
-                const isDevAdmin = u.role === 'dev_admin';
-                const isAdmin = u.role === 'admin' || isDevAdmin;
-                // 权限规则（前端预判，后端会再校验）：
-                //   - 不能封禁/注销自己
-                //   - 普通管理员不能封禁/注销其他管理员（只有 dev_admin 才行）
-                //   - dev_admin 账号永远不能被注销（即使另一个 dev_admin 也不行）
-                const canBan   = !isMe && (!isAdmin || myRole === 'dev_admin');
-                const canUnban = !isMe && u.isBanned && (!isAdmin || myRole === 'dev_admin');
-                const canDelete = !isMe && !isDevAdmin && (!isAdmin || myRole === 'dev_admin');
-
-                const banBtn = u.isBanned
-                  ? (canUnban
-                      ? `<button class="btn-mini btn-success" data-act="unban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">解封</button>`
-                      : `<span class="hint" style="margin:0">—</span>`)
-                  : (canBan
-                      ? `<button class="btn-mini btn-danger" data-act="ban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">封禁</button>`
-                      : `<span class="hint" style="margin:0">—</span>`);
-                const delBtn = canDelete
-                  ? `<button class="btn-mini btn-warning" data-act="delete" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-posts="${u.postCount || 0}">注销</button>`
-                  : (isMe ? `<span class="hint" style="margin:0" title="不能注销自己">本人</span>` : `<span class="hint" style="margin:0" title="该账号受保护">—</span>`);
-
-                const statusBadge = u.isBanned
-                  ? `<span class="status-badge status-banned">已封禁</span>`
-                  : `<span class="status-badge status-normal">正常</span>`;
-                const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
-                const roleText = isDevAdmin ? '开发管理员' : isAdmin ? '管理员' : '普通成员';
-                const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
-
-                return `<tr>
-                  <td>${escapeHtml(u.uid)}</td>
-                  <td>${escapeHtml(u.nickname)}${selfTag}</td>
-                  <td>${roleText}</td>
-                  <td>${u.postCount || 0}</td>
-                  <td>${escapeHtml(formatTime(u.createdAt))}</td>
-                  <td>${lastLogin}</td>
-                  <td>${statusBadge}</td>
-                  <td class="action-cell">${banBtn}${delBtn}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-      `;
-      // 事件委托：所有 操作按钮 统一走二次确认
-      host.querySelectorAll('[data-act]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const act = btn.dataset.act;
-          const uid = btn.dataset.uid;
-          const nick = btn.dataset.nick;
-          const posts = btn.dataset.posts;
-          if (act === 'ban')    confirmBan(uid, nick);
-          if (act === 'unban')  confirmUnban(uid, nick);
-          if (act === 'delete') confirmDelete(uid, nick, posts);
-        });
-      });
-    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
-  })();
 
   // --- 板块2：分区（静态枚举）+ 标签（异步全量）---
   const catsHost = document.getElementById('adminCats');
@@ -1520,6 +1437,231 @@ window._adminPinSave = async function _adminPinSave() {
     if (m) { m.textContent = `❌ ${e.message}`; m.style.color = '#dc2626'; }
   }
 };
+
+// ==================== 管理员：账号列表渲染 + 封禁/注销二次确认 ====================
+/**
+ * 渲染管理员面板的账号列表板块（含最后登录时间、状态徽章、封禁/注销操作按钮）。
+ * 拆成独立函数，便于封禁/注销成功后单独刷新本板块而不影响其他板块状态。
+ */
+async function renderAdminUsers(host) {
+  if (!host) return;
+  host.innerHTML = `🔄 加载中...`;
+  try {
+    const r = await api.admin.listUsers();
+    if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+    const users = r.data || [];
+    if (users.length === 0) { host.innerHTML = `<span class="hint">暂无注册账号</span>`; return; }
+
+    const me = api.getCurrentUser();       // 当前登录的管理员（用于禁止自我操作）
+    const myUid = me && me.uid;
+    const myRole = me && me.role;
+
+    host.innerHTML = `
+      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
+      <div style="overflow-x:auto">
+        <table class="admin-table">
+          <thead><tr>
+            <th>UID</th>
+            <th>昵称</th>
+            <th>角色</th>
+            <th>帖子数</th>
+            <th>注册时间</th>
+            <th>最后登录</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody>
+            ${users.map(u => {
+              const isMe = u.uid === myUid;
+              const isDevAdmin = u.role === 'dev_admin';
+              const isAdmin = u.role === 'admin' || isDevAdmin;
+              // 权限规则（前端预判，后端会再校验）：
+              //   - 不能封禁/注销自己
+              //   - 普通管理员不能封禁/注销其他管理员（只有 dev_admin 才行）
+              //   - dev_admin 账号永远不能被注销（即使另一个 dev_admin 也不行）
+              const canBan    = !isMe && (!isAdmin || myRole === 'dev_admin');
+              const canUnban  = !isMe && u.isBanned && (!isAdmin || myRole === 'dev_admin');
+              const canDelete = !isMe && !isDevAdmin && (!isAdmin || myRole === 'dev_admin');
+
+              const banBtn = u.isBanned
+                ? (canUnban
+                    ? `<button class="btn-mini btn-success" data-act="unban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">解封</button>`
+                    : `<span class="hint" style="margin:0">—</span>`)
+                : (canBan
+                    ? `<button class="btn-mini btn-danger" data-act="ban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">封禁</button>`
+                    : `<span class="hint" style="margin:0">—</span>`);
+              const delBtn = canDelete
+                ? `<button class="btn-mini btn-warning" data-act="delete" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-posts="${u.postCount || 0}">注销</button>`
+                : (isMe ? `<span class="hint" style="margin:0" title="不能注销自己">本人</span>` : `<span class="hint" style="margin:0" title="该账号受保护">—</span>`);
+
+              const statusBadge = u.isBanned
+                ? `<span class="status-badge status-banned">已封禁</span>`
+                : `<span class="status-badge status-normal">正常</span>`;
+              const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
+              const roleText = isDevAdmin ? '开发管理员' : isAdmin ? '管理员' : '普通成员';
+              const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
+
+              return `<tr>
+                <td>${escapeHtml(u.uid)}</td>
+                <td>${escapeHtml(u.nickname)}${selfTag}</td>
+                <td>${roleText}</td>
+                <td>${u.postCount || 0}</td>
+                <td>${escapeHtml(formatTime(u.createdAt))}</td>
+                <td>${lastLogin}</td>
+                <td>${statusBadge}</td>
+                <td class="action-cell">${banBtn}${delBtn}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    // 事件委托：所有 操作按钮 统一走二次确认
+    host.querySelectorAll('[data-act]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.act;
+        const uid = btn.dataset.uid;
+        const nick = btn.dataset.nick;
+        const posts = btn.dataset.posts;
+        if (act === 'ban')    confirmBan(uid, nick);
+        if (act === 'unban')  confirmUnban(uid, nick);
+        if (act === 'delete') confirmDelete(uid, nick, posts);
+      });
+    });
+  } catch (e) {
+    host.innerHTML = `❌ ${escapeHtml(e.message)}`;
+  }
+}
+
+/**
+ * 通用二次确认弹窗（危险操作专用）。
+ * @param {Object} opts
+ * @param {string} opts.title       弹窗标题
+ * @param {string} opts.message     正文（允许 HTML，调用方自行 escape）
+ * @param {string} opts.confirmText 确认按钮文案
+ * @param {string} [opts.cancelText] 取消按钮文案（默认"取消"）
+ * @param {boolean} [opts.danger]    是否危险（红色按钮）
+ * @param {string} [opts.requireText] 需要用户精确输入的文本（输入正确才解锁确认按钮，不可逆操作专用）
+ * @returns {Promise<boolean>}     true=用户确认，false=取消
+ */
+function adminConfirm(opts) {
+  return new Promise(resolve => {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.style.zIndex = '120';
+    const needInput = !!opts.requireText;
+    mask.innerHTML = `
+      <div class="modal" style="max-width:460px">
+        <div class="modal-header">
+          <span class="modal-title">${opts.danger ? '⚠️ ' : ''}${escapeHtml(opts.title || '确认操作')}</span>
+        </div>
+        <div class="modal-body" style="font-size:14px;line-height:1.7;white-space:normal">
+          ${opts.message || ''}
+          ${needInput ? `
+            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e5e7eb">
+              <div style="font-size:12px;color:#6b7280;margin-bottom:6px">请输入 <b>${escapeHtml(opts.requireText)}</b> 以确认：</div>
+              <input id="adminConfirmInput" type="text" autocomplete="off" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:14px" />
+            </div>` : ''}
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end;gap:8px">
+          <button class="secondary" id="adminConfirmCancel">${escapeHtml(opts.cancelText || '取消')}</button>
+          <button id="adminConfirmOk" ${opts.danger ? 'class="danger"' : ''} ${needInput ? 'disabled' : ''}>${escapeHtml(opts.confirmText || '确认')}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(mask);
+
+    const okBtn = mask.querySelector('#adminConfirmOk');
+    const cancelBtn = mask.querySelector('#adminConfirmCancel');
+    let done = false;
+    const close = (result) => {
+      if (done) return;
+      done = true;
+      mask.remove();
+      resolve(result);
+    };
+    cancelBtn.addEventListener('click', () => close(false));
+    mask.addEventListener('click', e => { if (e.target === mask) close(false); });
+    okBtn.addEventListener('click', () => close(true));
+
+    if (needInput) {
+      const input = mask.querySelector('#adminConfirmInput');
+      const target = opts.requireText;
+      const check = () => { okBtn.disabled = input.value.trim() !== target; };
+      input.addEventListener('input', check);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter' && !okBtn.disabled) close(true); });
+      setTimeout(() => input.focus(), 0);
+    } else {
+      okBtn.addEventListener('keydown', e => { if (e.key === 'Enter') close(true); });
+      setTimeout(() => okBtn.focus(), 0);
+    }
+    document.addEventListener('keydown', function esc(e) {
+      if (e.key === 'Escape') { close(false); document.removeEventListener('keydown', esc); }
+    });
+  });
+}
+
+// ---- 封禁（危险：禁止登录）----
+async function confirmBan(uid, nick) {
+  const ok = await adminConfirm({
+    title: '封禁账号',
+    danger: true,
+    confirmText: '确认封禁',
+    message: `确定要封禁账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>
+              封禁后该用户将<b>无法登录</b>，但已发布内容保留。<br/>
+              你可随时在右侧点「解封」恢复登录。`,
+  });
+  if (!ok) return;
+  const r = await api.admin.banUser(uid);
+  if (r.success) {
+    await renderAdminUsers(document.getElementById('adminUsers'));
+  } else {
+    alert(`封禁失败：${r.message || '未知错误'}`);
+  }
+}
+
+// ---- 解封（恢复正常登录，非危险，但仍二次确认防误触）----
+async function confirmUnban(uid, nick) {
+  const ok = await adminConfirm({
+    title: '解封账号',
+    confirmText: '确认解封',
+    message: `确定要解封账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>解封后该用户可正常登录。`,
+  });
+  if (!ok) return;
+  const r = await api.admin.unbanUser(uid);
+  if (r.success) {
+    await renderAdminUsers(document.getElementById('adminUsers'));
+  } else {
+    alert(`解封失败：${r.message || '未知错误'}`);
+  }
+}
+
+// ---- 注销（最危险：物理删除 + 级联，不可恢复，必须输入昵称解锁）----
+async function confirmDelete(uid, nick, posts) {
+  const ok = await adminConfirm({
+    title: '永久注销账号',
+    danger: true,
+    confirmText: '确认永久注销',
+    requireText: nick,
+    message: `<b style="color:#dc2626">⚠ 此操作不可恢复！</b><br/>
+              确定要永久注销账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>
+              将<b>物理删除</b>该用户及其所有关联数据，包括：
+              <ul style="margin:6px 0 0 18px;padding:0">
+                <li>帖子 ${escapeHtml(String(posts || 0))} 篇</li>
+                <li>全部评论、楼中楼回复</li>
+                <li>所有私信记录</li>
+                <li>点赞、收藏数据</li>
+              </ul>
+              为防止误操作，请在下方输入该账号昵称 <b>${escapeHtml(nick)}</b> 以解锁确认按钮。`,
+  });
+  if (!ok) return;
+  const r = await api.admin.deleteUser(uid);
+  if (r.success) {
+    await renderAdminUsers(document.getElementById('adminUsers'));
+  } else {
+    alert(`注销失败：${r.message || '未知错误'}`);
+  }
+}
 
 // ==================== 登录后：未读公告逐条弹窗 ====================
 async function popupUnreadAnnouncements() {

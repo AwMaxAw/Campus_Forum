@@ -369,6 +369,62 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 .modal-body { padding: 18px; overflow-y: auto; font-size: 14px; white-space: pre-wrap; }
 .modal-footer { padding: 12px 18px; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #86868b; }
 
+/* --------------------- 管理员面板：账号表格 / 状态徽章 / 迷你操作按钮 --------------------- */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.admin-table th {
+  text-align: left;
+  color: #6b7280;
+  padding: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+.admin-table td {
+  padding: 8px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+.admin-table tr:hover td { background: #f9fafb; }
+.admin-table .action-cell {
+  white-space: nowrap;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+/* 迷你按钮（表格内操作） */
+.btn-mini {
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  margin: 0;
+  transition: filter .15s, opacity .15s;
+}
+.btn-mini:hover:not(:disabled) { filter: brightness(0.92); }
+.btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-mini.btn-danger { background: #ef4444; }
+.btn-mini.btn-danger:hover:not(:disabled) { background: #dc2626; }
+.btn-mini.btn-warning { background: #f59e0b; }
+.btn-mini.btn-warning:hover:not(:disabled) { background: #d97706; }
+.btn-mini.btn-success { background: #10b981; }
+.btn-mini.btn-success:hover:not(:disabled) { background: #059669; }
+/* 状态徽章 */
+.status-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.status-badge.status-normal { background: #dcfce7; color: #15803d; }
+.status-badge.status-banned { background: #fee2e2; color: #b91c1c; }
+
 /* --------------------- 个人中心 --------------------- */
 .profile-header {
   background: linear-gradient(135deg, #0071e3, #5ac8fa);
