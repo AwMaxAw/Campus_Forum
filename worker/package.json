@@ -7,7 +7,13 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
-  "keywords": ["cloudflare", "workers", "d1", "hono", "forum"],
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "d1",
+    "hono",
+    "forum"
+  ],
   "author": "AwMaxAw",
   "license": "MIT",
   "devDependencies": {

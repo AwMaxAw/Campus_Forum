@@ -280,9 +280,12 @@ posts.post('/', requireAuth(), async (c) => {
     if (content.length > 2000) return fail('内容不能超过 2000 字');
     if (cleanTags.some(t => /["'\\<>{}]/.test(t))) return fail('标签不能包含特殊字符');
 
+    // 置顶：仅管理员可在发帖时直接置顶
+    const isPinned = isAdmin && !!body.isPinned;
+
     const result = await db
-      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
-      .bind(uid, title, content, category, tagsStr)
+      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, is_pinned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
+      .bind(uid, title, content, category, tagsStr, isPinned ? 1 : 0)
       .run();
 
     const postId = result && result.meta && typeof result.meta.last_row_id === 'number'
@@ -325,6 +328,33 @@ posts.delete('/:id', requireAuth(), async (c) => {
   await db.prepare('UPDATE comments SET is_hidden = 1 WHERE post_id = ?').bind(id).run();
 
   return c.json(ok({ id, hidden: true }));
+});
+
+// ==================== 置顶/取消置顶（JWT：仅 admin/dev_admin）====================
+posts.patch('/:id/pin', requireAuth(), async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id) || id <= 0) return fail('帖子 ID 无效');
+
+    const payload = c.get('jwtPayload');
+    const uid = payload && payload.sub;
+    const role = payload && payload.role;
+    const isAdmin = role === 'admin' || role === 'dev_admin';
+    if (!isAdmin) return fail('只有管理员才能置顶/取消置顶帖子', 403);
+
+    let body;
+    try { body = await c.req.json(); } catch { body = {}; }
+    const isPinned = !!body.isPinned;
+
+    const db = c.env.DB;
+    const post = await db.prepare('SELECT id FROM posts WHERE id = ? AND is_hidden = 0').bind(id).first();
+    if (!post) return fail('帖子不存在或已删除', 404);
+
+    await db.prepare('UPDATE posts SET is_pinned = ?, updated_at = datetime(\'now\') WHERE id = ?').bind(isPinned ? 1 : 0, id).run();
+    return c.json(ok({ id, isPinned }));
+  } catch (e) {
+    return fail(`[posts pin] ${e.name}: ${e.message}`, 500);
+  }
 });
 
 export default posts;

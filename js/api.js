@@ -28,7 +28,7 @@ export const CATEGORIES = [
   { key: 'study',   label: '学习', cssColor: '#2563eb', description: '学习交流、作业、题目、考试经验' },
   { key: 'club',    label: '社团', cssColor: '#9333ea', description: '社团招新、活动通知、兴趣同好' },
   { key: 'life',    label: '生活', cssColor: '#059669', description: '校园生活、失物招领、吐槽、日常分享' },
-  { key: 'meta',    label: '公告', cssColor: '#dc2626', description: '管理员发布的论坛公告 / 使用须知（仅管理员可发帖到此分区）', adminOnly: true },
+  { key: 'meta',    label: '站务', cssColor: '#dc2626', description: '管理员发布的论坛公告 / 使用须知（仅管理员可发帖到此分区）', adminOnly: true },
 ];
 export function categoryMeta(key) {
   return CATEGORIES.find(c => c.key === key) || { key: key || 'unknown', label: (key || '未知'), cssColor: '#6b7280', description: '' };
@@ -218,10 +218,10 @@ export const posts = {
    *   - tags: 数组<string>（最多 5 个）
    * 后端会优先采用前端传的 category；如果不合法 → 管理员级校验不通过 → 再回退 general。
    */
-  async create(title, content, tags = [], category = 'general') {
+  async create(title, content, tags = [], category = 'general', isPinned = false) {
     if (!tokenCache) return { success: false, message: '请先登录' };
     if (!Array.isArray(tags)) tags = [];
-    return request('/api/posts', { method: 'POST', body: { title, content, tags, category } });
+    return request('/api/posts', { method: 'POST', body: { title, content, tags, category, isPinned } });
   },
   async remove(id) {
     return request(`/api/posts/${id}`, { method: 'DELETE' });

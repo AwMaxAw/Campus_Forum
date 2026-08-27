@@ -41,7 +41,7 @@ const CATEGORIES = api.CATEGORIES || [
   { key: 'study',   label: '学习', cssColor: '#2563eb' },
   { key: 'club',    label: '社团', cssColor: '#9333ea' },
   { key: 'life',    label: '生活', cssColor: '#059669' },
-  { key: 'meta',    label: '公告', cssColor: '#dc2626', adminOnly: true },
+  { key: 'meta',    label: '站务', cssColor: '#dc2626', adminOnly: true },
 ];
 const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
 const CATEGORY_COLOR = Object.fromEntries(CATEGORIES.map(c => [c.key, c.cssColor || '#6b7280']));
@@ -376,18 +376,20 @@ function renderRegister(app) {
   document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
 }
 
-// 发帖状态：标签数组 + 选中分区 key
+// 发帖状态：标签数组 + 选中分区 key + 置顶
 let draftPostTags = [];
 let draftPostCategory = 'general';
+let draftPostPinned = false;
 
 function renderPost(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   const me = api.getCurrentUser();
   const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
   draftPostTags = [];
-  draftPostCategory = 'general'; // 每次进新帖页都重置为默认「综合」
+  draftPostCategory = 'general';
+  draftPostPinned = false;
 
-  // 分区单选 chip：meta 仅管理员可见
+  // 分区下拉选项：meta 仅管理员可见
   const visibleCategories = CATEGORIES.filter(c => isAdmin || !c.adminOnly);
 
   app.innerHTML = `
@@ -395,24 +397,15 @@ function renderPost(app) {
       <h3>发新帖</h3>
 
       <div style="margin-bottom:14px">
-        <label style="font-size:13px;color:#424245;display:block;margin-bottom:8px">
-          📂 分区（必选，单选）
+        <label for="categorySelect" style="font-size:13px;color:#424245;display:block;margin-bottom:8px">
+          📂 分区（必选）
         </label>
-        <div id="categoryChips" style="display:flex;flex-wrap:wrap;gap:8px">
+        <select id="categorySelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
           ${visibleCategories.map(c => {
-            const active = c.key === draftPostCategory;
-            const color = c.cssColor || '#6b7280';
-            const bg = active ? color : '#fff';
-            const fg = active ? '#fff' : color;
-            const border = active ? color : (c.adminOnly ? '#dc2626' : '#d2d2d7');
-            const pad = c.adminOnly ? '<small style="margin-left:4px;opacity:.9">🔒管</small>' : '';
-            const desc = c.description ? `title="${escapeHtml(c.description)}"` : '';
-            return `<button type="button" data-cat="${escapeHtml(c.key)}" ${desc}
-                style="padding:6px 14px;border:1px solid ${border};border-radius:999px;font-size:13px;background:${bg};color:${fg};cursor:pointer;transition:.15s;font-weight:${active?600:500}">
-                ${escapeHtml(c.label)}${pad}
-              </button>`;
+            const pad = c.adminOnly ? ' 🔒管' : '';
+            return `<option value="${escapeHtml(c.key)}">${escapeHtml(c.label)}${pad}　— ${escapeHtml(c.description || '')}</option>`;
           }).join('')}
-        </div>
+        </select>
       </div>
 
       <input id="titleInput" placeholder="标题（必填，100字内）" maxlength="100">
@@ -428,36 +421,35 @@ function renderPost(app) {
                maxlength="20"
                style="width:100%">
         <p class="hint" style="margin:2px 0 0 0">
-          💡 分区用于大分类（综合/学习/社团/生活/公告），标签用于细分话题，两者可以同时使用一起搜索。
+          💡 分区用于大分类（综合/学习/社团/生活/站务），标签用于细分话题，两者可以同时使用一起搜索。
         </p>
       </div>
+
+      ${isAdmin ? `
+      <div style="margin-bottom:14px;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="pinCheckbox" style="width:16px;height:16px;cursor:pointer">
+        <label for="pinCheckbox" style="font-size:13px;color:#424245;cursor:pointer">📌 置顶此帖（管理员专属，置顶帖将显示在列表最前面）</label>
+      </div>
+      ` : ''}
 
       <button id="postBtn" onclick="doPost()">发布</button>
       <button class="secondary" onclick="location.hash='home'">取消</button>
     </div>
   `;
 
-  // --- 分区单选 chip 逻辑 ---
-  const catBox = document.getElementById('categoryChips');
-  function reflowCategoryChips() {
-    catBox.querySelectorAll('button[data-cat]').forEach(btn => {
-      const key = btn.getAttribute('data-cat');
-      const meta = CATEGORIES.find(c => c.key === key);
-      const active = key === draftPostCategory;
-      const color = meta && meta.cssColor ? meta.cssColor : '#6b7280';
-      btn.style.background = active ? color : '#fff';
-      btn.style.color = active ? '#fff' : color;
-      btn.style.borderColor = active ? color : (meta && meta.adminOnly ? '#dc2626' : '#d2d2d7');
-      btn.style.fontWeight = active ? '600' : '500';
+  // --- 分区下拉逻辑 ---
+  const catSelect = document.getElementById('categorySelect');
+  catSelect.addEventListener('change', () => {
+    draftPostCategory = catSelect.value;
+  });
+
+  // --- 置顶 checkbox（管理员）---
+  const pinCheckbox = document.getElementById('pinCheckbox');
+  if (pinCheckbox) {
+    pinCheckbox.addEventListener('change', () => {
+      draftPostPinned = pinCheckbox.checked;
     });
   }
-  catBox.querySelectorAll('button[data-cat]').forEach(btn => {
-    btn.addEventListener('click', e => {
-      draftPostCategory = String(btn.getAttribute('data-cat') || '');
-      reflowCategoryChips();
-    });
-  });
-  reflowCategoryChips();
 
   // --- 多标签 chip 逻辑 ---
   const tagInput = document.getElementById('tagInput');
@@ -1081,7 +1073,7 @@ window.doPost = async function doPost() {
   const btn = document.getElementById('postBtn');
   btn.disabled = true; btn.textContent = '发布中...';
   try {
-    const r = await api.posts.create(title, content, tags, category);
+    const r = await api.posts.create(title, content, tags, category, draftPostPinned);
     if (r.success) location.hash = 'home';
     else alert(r.message || '发布失败');
   } finally {
