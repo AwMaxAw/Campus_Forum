@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-reg-agree';
+import * as api from './api.js?v=20260827-reg-gap';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -486,8 +486,8 @@ function renderRegister(app) {
       <input id="pwd2Input" type="password" placeholder="再次输入密码" autocomplete="new-password">
       <input id="nickInput" placeholder="昵称（1-20字，可选）" maxlength="20">
       <textarea id="bioInput" placeholder="个人简介（可选，200字内）" maxlength="200" style="min-height:60px"></textarea>
-      <label style="display:flex;align-items:flex-start;gap:8px;margin:8px 0;font-size:13px;line-height:1.5;cursor:pointer">
-        <input id="agreeInput" type="checkbox" style="margin-top:3px">
+      <label style="display:flex;align-items:flex-start;gap:8px;margin:0 0 8px;font-size:13px;line-height:1.5;cursor:pointer">
+        <input id="agreeInput" type="checkbox" style="margin-top:3px;width:auto;flex:0 0 auto">
         <span>我已阅读并同意 <a href="#about" target="_blank" onclick="event.stopPropagation()">《关于本站》</a> 中的全部声明（含站点性质、用户责任与行为规范、内容免责、侵权处理、未成年人保护、知识产权等条款）。</span>
       </label>
       <button id="regBtn" onclick="doRegister()">注册</button>
