@@ -26,6 +26,11 @@ function escapeHtml(s) {
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
 }
+
+/** 把字面量 \n / \r\n 转为真正换行符（兼容历史脏数据） */
+function normalizeNewlines(s) {
+  return String(s == null ? '' : s).replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+}
 function formatTime(iso) {
   if (!iso) return '';
   try {
@@ -249,7 +254,7 @@ function postCard(p, opts = {}) {
         <span>${escapeHtml(time)}</span>
       </div>
       <h3>${escapeHtml(p.title)}</h3>
-      <p style="white-space:pre-wrap">${escapeHtml((p.content || '').slice(0, 140))}${(p.content || '').length > 140 ? '…' : ''}</p>
+      <p style="white-space:pre-wrap">${escapeHtml(normalizeNewlines((p.content || '').slice(0, 140)))}${(p.content || '').length > 140 ? '…' : ''}</p>
       ${imagesHtml}
       ${tags}
       <div class="meta" style="margin-top:8px">${stats}</div>
@@ -942,7 +947,7 @@ async function renderDetail(app, postId) {
         <span>·</span><span>👁 ${p.viewCount} 浏览</span>
       </div>
       <h2>${escapeHtml(p.title)}</h2>
-      <div class="detail-body">${escapeHtml(p.content)}</div>
+      <div class="detail-body">${escapeHtml(normalizeNewlines(p.content))}</div>
       ${imagesHtml}
       ${tagsHtml}
       <div class="action-bar">
