@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260828-admin-images';
+import * as api from './api.js?v=20260828-user-search';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -329,6 +329,68 @@ window.clearHomeFilters = function clearHomeFilters() {
   setTimeout(route, 0);
 };
 
+// ==================== 用户搜索功能 ====================
+window.runUserSearch = async function runUserSearch() {
+  const input = document.getElementById('userSearchInput');
+  const results = document.getElementById('userSearchResults');
+  if (!input || !results) return;
+  const q = (input.value || '').trim();
+  if (!q) { results.innerHTML = ''; return; }
+
+  results.innerHTML = '<span class="hint">🔄 搜索中...</span>';
+  try {
+    const r = await api.users.search(q);
+    if (!r.success) { results.innerHTML = `<span class="hint">❌ ${escapeHtml(r.message)}</span>`; return; }
+    const list = r.data || [];
+    if (list.length === 0) {
+      results.innerHTML = `<span class="hint">未找到匹配的用户</span>`;
+      return;
+    }
+    results.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:6px">找到 ${list.length} 个用户</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${list.map(u => renderUserSearchItem(u)).join('')}
+      </div>`;
+  } catch (e) {
+    results.innerHTML = `<span class="hint">❌ 搜索失败：${escapeHtml(e.message)}</span>`;
+  }
+};
+
+window.clearUserSearch = function clearUserSearch() {
+  const input = document.getElementById('userSearchInput');
+  const results = document.getElementById('userSearchResults');
+  if (input) input.value = '';
+  if (results) results.innerHTML = '';
+};
+
+function renderUserSearchItem(u) {
+  const matchBadge = u.matchType === 'uid'
+    ? `<span style="font-size:11px;color:#059669;background:#d1fae5;padding:0 5px;border-radius:4px;margin-left:4px">UID 匹配</span>`
+    : `<span style="font-size:11px;color:#2563eb;background:#dbeafe;padding:0 5px;border-radius:4px;margin-left:4px">昵称匹配</span>`;
+  return `<div onclick="location.hash='#user/${escapeHtml(u.uid)}'" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:background 0.15s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+    <span class="avatar-sm" style="flex-shrink:0">${buildAvatarInner(u)}</span>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:4px">
+        <span style="font-weight:500;color:#1f2937">${escapeHtml(u.nickname)}</span>
+        ${matchBadge}
+        ${roleBadgeInline(u.role)}
+      </div>
+      <div style="font-size:12px;color:#6b7280">UID: ${escapeHtml(u.uid)} · 帖子 ${u.postCount || 0} · 注册 ${escapeHtml(formatTime(u.createdAt))}</div>
+    </div>
+    <span style="color:#6b7280;font-size:12px">→</span>
+  </div>`;
+}
+
+/**
+ * 用户主页「发私信」按钮：打开私信页面（如果已存在对话则直接进入）
+ * 如果还没有对话，创建一条欢迎消息后跳转
+ */
+window.openQuickMessage = async function openQuickMessage(toUid, toNickname) {
+  if (!api.isLoggedIn()) { alert('请先登录'); location.hash = 'login'; return; }
+  if (!toUid) return;
+  // 直接跳转到私信页面（私信系统已按对方 UID 聚合会话，首次进入会自动创建会话）
+  location.hash = `messages?peer=${encodeURIComponent(toUid)}&name=${encodeURIComponent(toNickname || '')}`;
+};
+
 // ==================== 视图：封面页（首页 #home，未登录也能看）====================
 function renderCover(app) {
   const loggedIn = api.isLoggedIn();
@@ -486,6 +548,17 @@ async function renderForum(app) {
       </div>
       ${tabBarHtml}
       <div id="popularTags">🔄 正在读取热门标签…</div>
+    </div>
+
+    <!-- 搜索用户（独立卡片，紧凑） -->
+    <div class="card search-panel" style="padding:12px 14px">
+      <h3 style="margin:0 0 8px 0;font-size:14px">👤 搜索用户</h3>
+      <div class="search-row" style="margin:0">
+        <input id="userSearchInput" placeholder="输入 UID 或昵称关键字（如 20260101、五中、数学）" onkeydown="if(event.key==='Enter')runUserSearch()">
+        <button onclick="runUserSearch()">🔎 搜用户</button>
+        <button class="secondary" onclick="clearUserSearch()">🗑 清除</button>
+      </div>
+      <div id="userSearchResults" style="margin-top:10px"></div>
     </div>
 
     <div class="card">
@@ -1520,7 +1593,7 @@ window.doSaveProfile = async function doSaveProfile() {
 };
 
 // ==================== 视图：私信（会话列表 + 对话窗） ====================
-async function renderMessages(app) {
+async function renderMessages(app, autoPeerUid, autoPeerName) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   app.innerHTML = `
     <div class="messages-layout">
@@ -1541,6 +1614,16 @@ async function renderMessages(app) {
       </div>
     </div>
   `;
+
+  // 如果是从用户主页带参进来的，自动填充并打开对话
+  if (autoPeerUid) {
+    const newDmInput = document.getElementById('newDmUid');
+    if (newDmInput) newDmInput.value = autoPeerUid;
+    // 等会话列表加载完再打开
+    setTimeout(() => {
+      openConversation(autoPeerUid);
+    }, 300);
+  }
 
   // 拉会话列表
   try {
@@ -2348,6 +2431,13 @@ async function renderUserProfile(app, uid) {
   }
   const me = api.isLoggedIn() ? api.getCurrentUser() : null;
   const isMe = me && me.uid === profile.uid;
+  const canMessage = !isMe && api.isLoggedIn();
+  const messageBtn = canMessage
+    ? `<button onclick="openQuickMessage('${escapeHtml(profile.uid)}','${escapeHtml(profile.nickname)}')" style="margin-top:8px">✉️ 发私信</button>`
+    : '';
+  const editBtn = isMe
+    ? `<button class="secondary" onclick="location.hash='me'" style="margin-top:8px">✏️ 去编辑我的资料</button>`
+    : '';
   const header = `
     <div class="profile-header" id="userProfileHeader">
       <div class="avatar-lg">${buildAvatarInner(profile)}</div>
@@ -2355,7 +2445,7 @@ async function renderUserProfile(app, uid) {
         <div class="profile-name">${escapeHtml(profile.nickname)}${roleBadgeInline(profile.role)}${isMe ? ' <span style="color:#6b7280;font-size:12px;margin-left:6px">（这是你自己）</span>' : ''}</div>
         <div class="profile-uid">UID：${escapeHtml(profile.uid)}　帖子数：${profile.postCount || 0}　注册于 ${escapeHtml(formatTime(profile.createdAt))}</div>
         ${profile.bio ? `<div class="profile-bio">${escapeHtml(profile.bio)}</div>` : '<div class="profile-bio" style="opacity:0.6">这个人还没有写简介</div>'}
-        ${isMe ? `<div style="margin-top:8px"><button class="secondary" onclick="location.hash='me'">✏️ 去编辑我的资料</button></div>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">${editBtn}${messageBtn}</div>
       </div>
     </div>
   `;
@@ -2385,7 +2475,14 @@ function route() {
   else if (path === 'detail' && seg2) renderDetail(app, parseInt(seg2, 10));
   else if (path === 'me') renderMe(app);
   else if (path === 'user' && seg2) renderUserProfile(app, seg2);
-  else if (path === 'messages') renderMessages(app);
+  else if (path === 'messages') {
+    // 解析查询参数：messages?peer=UID&name=昵称
+    const qs = rest.join('?');
+    const qp = new URLSearchParams(qs);
+    const peerUid = qp.get('peer');
+    const peerName = qp.get('name');
+    renderMessages(app, peerUid, peerName);
+  }
   else if (path === 'announcements') renderAnnouncements(app);
   else if (path === 'about') renderAbout(app);
   else if (path === 'admin') renderAdmin(app);

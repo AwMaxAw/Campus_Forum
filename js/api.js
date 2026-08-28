@@ -244,6 +244,11 @@ export const users = {
     if (!uid) return { success: false, message: 'UID 无效' };
     return request(`/api/users/${encodeURIComponent(uid)}`, { needsAuth: false });
   },
+  /** 按 UID 精确 + 昵称模糊搜索用户 */
+  async search(q) {
+    if (!q) return { success: false, message: '请输入搜索关键字' };
+    return request(`/api/users/search?q=${encodeURIComponent(q)}`, { needsAuth: false });
+  },
 };
 
 // ======================== 图片 ========================
