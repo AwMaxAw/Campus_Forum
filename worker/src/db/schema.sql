@@ -119,6 +119,15 @@ CREATE TABLE IF NOT EXISTS announcements_read (
   FOREIGN KEY (announcement_id) REFERENCES announcements(id)
 );
 
+-- 反馈表（悬浮球收集 bug / 建议）
+CREATE TABLE IF NOT EXISTS feedbacks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  author_uid TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (author_uid) REFERENCES users(uid)
+);
+
 -- ============ 索引（SQLite 默认 B-tree 主键够用，但常用查询建索引更稳）============
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_uid);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);

@@ -251,6 +251,20 @@ export const users = {
   },
 };
 
+// ======================== 反馈（悬浮球） ========================
+export const feedbacks = {
+  /** 提交一条反馈（需登录） */
+  async submit(content) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!content || !content.trim()) return { success: false, message: '内容不能为空' };
+    return request('/api/feedbacks', { method: 'POST', body: { content } });
+  },
+  /** 反馈列表（公开） */
+  async list(page = 1, limit = 50) {
+    return request(`/api/feedbacks?page=${page}&limit=${limit}`, { needsAuth: false });
+  },
+};
+
 // ======================== 图片 ========================
 export const images = {
   /**

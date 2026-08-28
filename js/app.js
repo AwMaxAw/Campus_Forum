@@ -565,6 +565,162 @@ function renderFaq(app) {
   `;
 }
 
+// ==================== 反馈悬浮球 ====================
+// 悬浮球 DOM 在 load 事件后一次性插入到 body，避免每次 route 重建
+function ensureFeedbackWidget() {
+  if (document.getElementById('feedbackBall')) return;
+
+  const ball = document.createElement('div');
+  ball.id = 'feedbackBall';
+  ball.innerHTML = '💬';
+  ball.title = '反馈 Bug / 建议';
+  Object.assign(ball.style, {
+    position: 'fixed',
+    right: '16px',
+    bottom: '24px',
+    width: '52px',
+    height: '52px',
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%)',
+    color: '#fff',
+    fontSize: '22px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 4px 14px rgba(99,102,241,0.4)',
+    zIndex: '9998',
+    transition: 'transform 0.2s, box-shadow 0.2s',
+    userSelect: 'none',
+  });
+  ball.onmouseenter = () => { ball.style.transform = 'scale(1.1)'; ball.style.boxShadow = '0 6px 20px rgba(99,102,241,0.5)'; };
+  ball.onmouseleave = () => { ball.style.transform = 'scale(1)'; ball.style.boxShadow = '0 4px 14px rgba(99,102,241,0.4)'; };
+  ball.onclick = toggleFeedbackPanel;
+
+  document.body.appendChild(ball);
+}
+
+function toggleFeedbackPanel() {
+  let panel = document.getElementById('feedbackPanel');
+  if (panel) {
+    panel.remove();
+    return;
+  }
+  panel = document.createElement('div');
+  panel.id = 'feedbackPanel';
+  Object.assign(panel.style, {
+    position: 'fixed',
+    right: '16px',
+    bottom: '88px',
+    width: '360px',
+    maxHeight: '520px',
+    background: '#fff',
+    borderRadius: '16px',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+    zIndex: '9999',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    border: '1px solid #e5e7eb',
+  });
+
+  panel.innerHTML = `
+    <div id="feedbackHeader" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff">
+      <span style="font-weight:600;font-size:14px">💬 Bug 反馈 & 建议</span>
+      <span id="feedbackClose" style="cursor:pointer;font-size:18px;opacity:0.8;line-height:1">×</span>
+    </div>
+    <div id="feedbackList" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:100px">
+      <span class="hint" style="padding:20px;text-align:center">🔄 加载反馈列表...</span>
+    </div>
+    <div id="feedbackInputWrap" style="padding:10px 12px;border-top:1px solid #f3f4f6;background:#fafafa">
+      ${api.isLoggedIn() ? `
+        <div style="display:flex;gap:8px">
+          <textarea id="feedbackInput" maxlength="1000" placeholder="说说你遇到的 bug 或建议..." style="flex:1;resize:none;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:13px;outline:none;font-family:inherit;height:54px" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitFeedback()}"></textarea>
+          <button onclick="submitFeedback()" style="padding:0 14px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500">发送</button>
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;text-align:right"><span id="feedbackCount">0</span>/1000</div>
+      ` : `
+        <div style="text-align:center;padding:8px 0">
+          <span style="font-size:12px;color:#6b7280">请先 <a href="#login" style="color:#6366f1;text-decoration:none" onclick="document.getElementById('feedbackPanel')?.remove()">登录</a> 后提交反馈</span>
+        </div>
+      `}
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  // 关闭按钮
+  document.getElementById('feedbackClose').onclick = () => panel.remove();
+
+  // 字数计数
+  const ta = document.getElementById('feedbackInput');
+  if (ta) {
+    ta.oninput = () => {
+      const c = document.getElementById('feedbackCount');
+      if (c) c.textContent = (ta.value || '').length;
+    };
+  }
+
+  // 加载反馈列表
+  loadFeedbackList();
+}
+
+async function loadFeedbackList() {
+  const listEl = document.getElementById('feedbackList');
+  if (!listEl) return;
+  try {
+    const r = await api.feedbacks.list(1, 50);
+    if (!r.success) { listEl.innerHTML = `<span class="hint">❌ ${escapeHtml(r.message)}</span>`; return; }
+    const list = r.data || [];
+    if (list.length === 0) { listEl.innerHTML = `<span class="hint" style="padding:20px;text-align:center">还没有反馈，快来发第一条吧～</span>`; return; }
+    listEl.innerHTML = list.map(renderFeedbackItem).join('');
+  } catch (e) {
+    listEl.innerHTML = `<span class="hint">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function renderFeedbackItem(f) {
+  const author = f.author || {};
+  const avatarHtml = author.avatarUrl
+    ? `<img src="${escapeHtml(author.avatarUrl)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`
+    : `<div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0">${escapeHtml((author.nickname || 'U').slice(0, 1))}</div>`;
+  return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid #f3f4f6">
+    ${avatarHtml}
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;color:#374151">${escapeHtml(author.nickname || '匿名用户')}</span>
+        ${author.role === 'admin' || author.role === 'dev_admin' ? `<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px">管理员</span>` : ''}
+        <span style="font-size:11px;color:#9ca3af">${escapeHtml(formatTime(f.createdAt))}</span>
+      </div>
+      <div style="font-size:13px;color:#1f2937;line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(normalizeNewlines(f.content))}</div>
+    </div>
+  </div>`;
+}
+
+window.submitFeedback = async function submitFeedback() {
+  const ta = document.getElementById('feedbackInput');
+  const listEl = document.getElementById('feedbackList');
+  if (!ta || !listEl) return;
+  const content = (ta.value || '').trim();
+  if (!content) return;
+
+  const sendBtn = ta.parentElement?.querySelector('button');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '发送中...'; }
+
+  const r = await api.feedbacks.submit(content);
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '发送'; }
+
+  if (!r.success) {
+    alert('发送失败：' + r.message);
+    return;
+  }
+  ta.value = '';
+  const c = document.getElementById('feedbackCount');
+  if (c) c.textContent = '0';
+  // 重新加载列表
+  loadFeedbackList();
+};
+
 // ==================== 视图：广场（帖子列表 + 分区Tab + 搜索条 + 热门标签，需登录）====================
 async function renderForum(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
@@ -2577,6 +2733,8 @@ window.addEventListener('load', async () => {
   }
   await renderTopBar();
   route();
+  // 悬浮反馈球
+  ensureFeedbackWidget();
   // 绑定汉堡按钮 + 遮罩点击
   const mt = document.getElementById('menuToggle');
   const dc = document.getElementById('drawerClose');

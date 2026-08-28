@@ -49,6 +49,7 @@ import announcementsRoutes from './routes/announcements.js';
 import adminRoutes from './routes/admin.js';
 import usersRoutes from './routes/users.js';
 import imagesRoutes from './routes/images.js';
+import feedbacksRoutes from './routes/feedbacks.js';
 
 const app = new Hono();
 
@@ -77,6 +78,7 @@ app.route('/api/announcements', announcementsRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/users', usersRoutes);
 app.route('/api/images', imagesRoutes);
+app.route('/api/feedbacks', feedbacksRoutes);
 
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
@@ -136,6 +138,21 @@ app.use('*', async (c, next) => {
         `).run();
         await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_images_post ON images(post_id)').run();
         await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_images_author ON images(author_uid)').run();
+      }
+      // feedbacks 表
+      const r5 = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('feedbacks')")
+        .first();
+      if (r5 && r5.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS feedbacks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            author_uid TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (author_uid) REFERENCES users(uid)
+          )
+        `).run();
       }
     } catch (e) {
       console.warn('[migrate] 自动迁移失败（可忽略，可能列已存在）：', e && e.message);
