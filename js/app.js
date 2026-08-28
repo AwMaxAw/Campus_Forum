@@ -1453,18 +1453,9 @@ async function renderAdmin(app) {
   app.innerHTML = `
     <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#b45309">🛡 管理员面板</span></div>
 
-    <!-- 五中本部 大标题 -->
-    <div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;gap:14px">
-      <div style="font-size:32px">🏫</div>
-      <div>
-        <div style="font-size:20px;font-weight:700;letter-spacing:1px">五中本部</div>
-        <div style="font-size:13px;opacity:.85;margin-top:2px">广州市第五中学 · 校本部 · 2026 届学生账号</div>
-      </div>
-    </div>
-
-    <!-- 板块1：已注册账号（五中本部） -->
+    <!-- 板块1：已注册账号（按 UID 分组） -->
     <div class="card">
-      <h3 style="margin-top:0">👤 五中本部 · 已注册账号</h3>
+      <h3 style="margin-top:0">👤 已注册账号</h3>
       <div id="adminUsers">🔄 加载中...</div>
     </div>
 
@@ -1638,71 +1629,48 @@ async function renderAdminUsers(host) {
     const users = r.data || [];
     if (users.length === 0) { host.innerHTML = `<span class="hint">暂无注册账号</span>`; return; }
 
-    const me = api.getCurrentUser();       // 当前登录的管理员（用于禁止自我操作）
+    const me = api.getCurrentUser();
     const myUid = me && me.uid;
     const myRole = me && me.role;
 
+    // 按 UID 分组：2026 开头 → 五中本部，其他 → 其他
+    const is2026 = u => /^2026/.test(String(u.uid));
+    const groupA = users.filter(is2026);   // 五中本部
+    const groupB = users.filter(u => !is2026(u));  // 其他
+
+    // 渲染单个分组表格的内部函数
+    function groupTable(title, subtitle, list, color) {
+      if (list.length === 0) return '';
+      return `
+        <div style="margin-bottom:18px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="display:inline-block;width:4px;height:18px;background:${color};border-radius:2px"></span>
+            <span style="font-weight:600;font-size:14px">${escapeHtml(title)}</span>
+            <span style="font-size:12px;color:#6b7280">· ${list.length} 个账号</span>
+          </div>
+          ${subtitle ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:6px">${escapeHtml(subtitle)}</div>` : ''}
+          <div style="overflow-x:auto">
+            <table class="admin-table">
+              <thead><tr>
+                <th>UID</th><th>昵称</th><th>角色</th><th>帖子数</th>
+                <th>注册时间</th><th>最后登录</th><th>状态</th><th>操作</th>
+              </tr></thead>
+              <tbody>
+                ${list.map(u => buildUserRow(u, myUid, myRole)).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
     host.innerHTML = `
-      <div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
-      <div style="overflow-x:auto">
-        <table class="admin-table">
-          <thead><tr>
-            <th>UID</th>
-            <th>昵称</th>
-            <th>角色</th>
-            <th>帖子数</th>
-            <th>注册时间</th>
-            <th>最后登录</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr></thead>
-          <tbody>
-            ${users.map(u => {
-              const isMe = u.uid === myUid;
-              const isDevAdmin = u.role === 'dev_admin';
-              const isAdmin = u.role === 'admin' || isDevAdmin;
-              // 权限规则（前端预判，后端会再校验）：
-              //   - 不能封禁/注销自己
-              //   - 普通管理员不能封禁/注销其他管理员（只有 dev_admin 才行）
-              //   - dev_admin 账号永远不能被注销（即使另一个 dev_admin 也不行）
-              const canBan    = !isMe && (!isAdmin || myRole === 'dev_admin');
-              const canUnban  = !isMe && u.isBanned && (!isAdmin || myRole === 'dev_admin');
-              const canDelete = !isMe && !isDevAdmin && (!isAdmin || myRole === 'dev_admin');
-
-              const banBtn = u.isBanned
-                ? (canUnban
-                    ? `<button class="btn-mini btn-success" data-act="unban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">解封</button>`
-                    : `<span class="hint" style="margin:0">—</span>`)
-                : (canBan
-                    ? `<button class="btn-mini btn-danger" data-act="ban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">封禁</button>`
-                    : `<span class="hint" style="margin:0">—</span>`);
-              const delBtn = canDelete
-                ? `<button class="btn-mini btn-warning" data-act="delete" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-posts="${u.postCount || 0}">注销</button>`
-                : (isMe ? `<span class="hint" style="margin:0" title="不能注销自己">本人</span>` : `<span class="hint" style="margin:0" title="该账号受保护">—</span>`);
-
-              const statusBadge = u.isBanned
-                ? `<span class="status-badge status-banned">已封禁</span>`
-                : `<span class="status-badge status-normal">正常</span>`;
-              const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
-              const roleText = isDevAdmin ? '开发管理员' : isAdmin ? '管理员' : '普通成员';
-              const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
-
-              return `<tr>
-                <td>${escapeHtml(u.uid)}</td>
-                <td>${escapeHtml(u.nickname)}${selfTag}</td>
-                <td>${roleText}</td>
-                <td>${u.postCount || 0}</td>
-                <td>${escapeHtml(formatTime(u.createdAt))}</td>
-                <td>${lastLogin}</td>
-                <td>${statusBadge}</td>
-                <td class="action-cell">${banBtn}${delBtn}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
+      ${groupTable('五中本部', '2026 届学生账号', groupA, '#1e40af')}
+      ${groupTable('其他', '非 2026 开头的账号', groupB, '#6b7280')}
     `;
-    // 事件委托：所有 操作按钮 统一走二次确认
+
+    // 事件委托
     host.querySelectorAll('[data-act]').forEach(btn => {
       btn.addEventListener('click', () => {
         const act = btn.dataset.act;
@@ -1717,6 +1685,45 @@ async function renderAdminUsers(host) {
   } catch (e) {
     host.innerHTML = `❌ ${escapeHtml(e.message)}`;
   }
+}
+
+// 构建单个用户表格行（两个分组共用，避免重复代码）
+function buildUserRow(u, myUid, myRole) {
+  const isMe = u.uid === myUid;
+  const isDevAdmin = u.role === 'dev_admin';
+  const isAdmin = u.role === 'admin' || isDevAdmin;
+  const canBan    = !isMe && (!isAdmin || myRole === 'dev_admin');
+  const canUnban  = !isMe && u.isBanned && (!isAdmin || myRole === 'dev_admin');
+  const canDelete = !isMe && !isDevAdmin && (!isAdmin || myRole === 'dev_admin');
+
+  const banBtn = u.isBanned
+    ? (canUnban
+        ? `<button class="btn-mini btn-success" data-act="unban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">解封</button>`
+        : `<span class="hint" style="margin:0">—</span>`)
+    : (canBan
+        ? `<button class="btn-mini btn-danger" data-act="ban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">封禁</button>`
+        : `<span class="hint" style="margin:0">—</span>`);
+  const delBtn = canDelete
+    ? `<button class="btn-mini btn-warning" data-act="delete" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-posts="${u.postCount || 0}">注销</button>`
+    : (isMe ? `<span class="hint" style="margin:0" title="不能注销自己">本人</span>` : `<span class="hint" style="margin:0" title="该账号受保护">—</span>`);
+
+  const statusBadge = u.isBanned
+    ? `<span class="status-badge status-banned">已封禁</span>`
+    : `<span class="status-badge status-normal">正常</span>`;
+  const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
+  const roleText = isDevAdmin ? '开发管理员' : isAdmin ? '管理员' : '普通成员';
+  const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
+
+  return `<tr>
+    <td>${escapeHtml(u.uid)}</td>
+    <td>${escapeHtml(u.nickname)}${selfTag}</td>
+    <td>${roleText}</td>
+    <td>${u.postCount || 0}</td>
+    <td>${escapeHtml(formatTime(u.createdAt))}</td>
+    <td>${lastLogin}</td>
+    <td>${statusBadge}</td>
+    <td class="action-cell">${banBtn}${delBtn}</td>
+  </tr>`;
 }
 
 /**
