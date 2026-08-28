@@ -512,6 +512,19 @@ function renderAbout(app) {
 }
 
 // ==================== 视图：常见问题与解答 FAQ ====================
+window.toggleFaq = function toggleFaq(i) {
+  const ans = document.getElementById('faqAns' + i);
+  const arrow = document.getElementById('faqArrow' + i);
+  if (!ans || !arrow) return;
+  if (ans.style.display === 'none') {
+    ans.style.display = 'block';
+    arrow.style.transform = 'rotate(180deg)';
+  } else {
+    ans.style.display = 'none';
+    arrow.style.transform = 'rotate(0deg)';
+  }
+};
+
 function renderFaq(app) {
   const faqs = [
     { q: '这个论坛是学校官方的吗？', a: '不是。本站由五中学生 Andrew 利用课余时间独立开发与维护，属于非官方、非营利性的个人项目，与广州市第五中学无任何隶属或合作关系。' },
@@ -549,21 +562,6 @@ function renderFaq(app) {
     <div class="card" style="margin-top:16px;text-align:center">
       <p style="margin:0;color:#6b7280">还有其他问题？欢迎 <a href="#messages" style="color:#2563eb">私信管理员</a> 或查看 <a href="#about" style="color:#2563eb">关于本站</a>。</p>
     </div>
-
-    <script>
-      function toggleFaq(i) {
-        const ans = document.getElementById('faqAns' + i);
-        const arrow = document.getElementById('faqArrow' + i);
-        if (!ans || !arrow) return;
-        if (ans.style.display === 'none') {
-          ans.style.display = 'block';
-          arrow.style.transform = 'rotate(180deg)';
-        } else {
-          ans.style.display = 'none';
-          arrow.style.transform = 'rotate(0deg)';
-        }
-      }
-    </script>
   `;
 }
 
