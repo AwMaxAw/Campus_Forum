@@ -532,13 +532,44 @@ function renderRegister(app) {
         中的<span style="color:#dc2626">隐私条款</span>、用户责任与行为规范、未成年人保护等全部声明。
       </p>
       <p style="margin:6px 0 0;font-size:12px;color:#6b7280">
-        📌 UID 格式：<strong>2026</strong>（年份）+ <strong>班级</strong>（2位）+ <strong>学号</strong>（2位）= 共 8 位数字<br>
-        例如：20260101 表示 2026 届 1 班 1 号
+        📌 UID 格式：<strong>26</strong>（年份）+ <strong>校区</strong>（1=五中本部 / 2=金碧校区）+ <strong>学段</strong>（1=初中 / 2=高中）+ <strong>班级</strong>（2位）+ <strong>学号</strong>（2位）= 共 8 位<br>
+        例如：26110101 = 26届 · 五中本部 · 初中 · 01班 · 01号
       </p>
     </div>
     <div class="card">
       <h3>注册新账号</h3>
-      <input id="uidInput" placeholder="UID：2026 + 班级(2位) + 学号(2位)，共8位数字" maxlength="8" inputmode="numeric">
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏫 校区</label>
+        <select id="campusSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          <option value="1">五中本部</option>
+          <option value="2">金碧校区</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">📚 学段</label>
+        <select id="levelSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          <option value="1">初中</option>
+          <option value="2">高中</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1">
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏫 班级（2位）</label>
+          <input id="classInput" placeholder="如 01" maxlength="2" inputmode="numeric" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🔢 学号（2位）</label>
+          <input id="stuNoInput" placeholder="如 01" maxlength="2" inputmode="numeric" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px">
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;padding:8px 12px;background:#f3f4f6;border-radius:8px;font-family:monospace;font-size:16px;font-weight:600;color:#1d1d1f;text-align:center" id="uidPreview">
+        UID：26110101
+      </div>
+
       <input id="pwdInput" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password">
       <input id="pwd2Input" type="password" placeholder="再次输入密码" autocomplete="new-password">
       <input id="nickInput" placeholder="昵称（1-20字，可选）" maxlength="20">
@@ -554,6 +585,25 @@ function renderRegister(app) {
       </p>
     </div>
   `;
+
+  // UID 实时预览
+  const campusSel = document.getElementById('campusSelect');
+  const levelSel = document.getElementById('levelSelect');
+  const classInp = document.getElementById('classInput');
+  const stuInp = document.getElementById('stuNoInput');
+  const preview = document.getElementById('uidPreview');
+  function updatePreview() {
+    const c = campusSel.value;
+    const l = levelSel.value;
+    const cl = (classInp.value || '').padStart(2, '0');
+    const sn = (stuInp.value || '').padStart(2, '0');
+    preview.textContent = `UID：26${c}${l}${cl}${sn}`;
+  }
+  campusSel.addEventListener('change', updatePreview);
+  levelSel.addEventListener('change', updatePreview);
+  classInp.addEventListener('input', updatePreview);
+  stuInp.addEventListener('input', updatePreview);
+
   document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
 }
 
@@ -1633,10 +1683,12 @@ async function renderAdminUsers(host) {
     const myUid = me && me.uid;
     const myRole = me && me.role;
 
-    // 按 UID 分组：2026 开头 → 五中本部，其他 → 其他
-    const is2026 = u => /^2026/.test(String(u.uid));
-    const groupA = users.filter(is2026);   // 五中本部
-    const groupB = users.filter(u => !is2026(u));  // 其他
+    // 按 UID 分组：261* → 五中本部，262* → 金碧校区，其他 → 其他
+    const isCampusA = u => /^261/.test(String(u.uid));   // 五中本部
+    const isCampusB = u => /^262/.test(String(u.uid));   // 金碧校区
+    const groupA = users.filter(isCampusA);
+    const groupB = users.filter(isCampusB);
+    const groupC = users.filter(u => !isCampusA(u) && !isCampusB(u));
 
     // 渲染单个分组表格的内部函数
     function groupTable(title, subtitle, list, color) {
@@ -1666,8 +1718,9 @@ async function renderAdminUsers(host) {
 
     host.innerHTML = `
       <div style="font-size:12px;color:#6b7280;margin-bottom:10px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
-      ${groupTable('五中本部', '2026 届学生账号', groupA, '#1e40af')}
-      ${groupTable('其他', '非 2026 开头的账号', groupB, '#6b7280')}
+      ${groupTable('五中本部', '26 届学生账号 · 五中本部', groupA, '#1e40af')}
+      ${groupTable('金碧校区', '26 届学生账号 · 金碧校区', groupB, '#059669')}
+      ${groupTable('其他', '非 26 开头的账号', groupC, '#6b7280')}
     `;
 
     // 事件委托
@@ -1922,12 +1975,16 @@ window.doLogin = async function doLogin() {
   }
 };
 window.doRegister = async function doRegister() {
-  const uid = document.getElementById('uidInput').value.trim();
+  const campus = document.getElementById('campusSelect').value;
+  const level = document.getElementById('levelSelect').value;
+  const cls = (document.getElementById('classInput').value || '').trim();
+  const stuNo = (document.getElementById('stuNoInput').value || '').trim();
+  const uid = `26${campus}${level}${cls.padStart(2,'0')}${stuNo.padStart(2,'0')}`;
   const pwd = document.getElementById('pwdInput').value;
   const confirm = document.getElementById('pwd2Input').value;
   const nickname = (document.getElementById('nickInput').value || '').trim();
   const bio = (document.getElementById('bioInput').value || '').trim();
-  if (!/^2026\d{4}$/.test(uid)) return alert('UID 必须是 8 位数字，且以 2026 开头（格式：2026 + 班级2位 + 学号2位）');
+  if (!/^26[12][12]\d{4}$/.test(uid)) return alert('UID 格式无效，请检查班级和学号是否各为 2 位数字');
   if (pwd.length < 6) return alert('密码至少 6 位');
   if (pwd !== confirm) return alert('两次输入的密码不一致');
   if (!document.getElementById('agreeInput').checked) return alert('请先阅读并勾选同意《关于本站》中的声明后再注册');

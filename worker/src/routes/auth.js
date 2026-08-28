@@ -55,7 +55,7 @@ auth.post('/register', async (c) => {
   const bio = (body.bio || '').toString().slice(0, 200) || null;
   const avatarUrl = (body.avatarUrl || body.avatar_url || '').toString().slice(0, 500) || null;
 
-  if (!isUidValid(uid)) return fail('UID 必须是 8 位数字，且以 2026 开头（格式：2026 + 班级2位 + 学号2位）');
+  if (!isUidValid(uid)) return fail('UID 格式无效：26(年份) + 校区(1=五中本部/2=金碧校区) + 学段(1=初中/2=高中) + 班级(2位) + 学号(2位)，共8位');
   if (password.length < 6) return fail('密码至少 6 位');
   if (password.length > 128) return fail('密码不能超过 128 位');
   if (nickname.length < 1 || nickname.length > 20) return fail('昵称 1-20 字');
