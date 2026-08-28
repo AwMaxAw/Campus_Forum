@@ -1,5 +1,5 @@
 /**
- * 五中校园论坛 - Cloudflare Worker 入口
+ * 广五校园论坛 - Cloudflare Worker 入口
  *
  * 阶段 4：帖子详情 + 评论/楼中楼 + 点赞 + 收藏 + 私信 + 公告
  *
@@ -56,7 +56,7 @@ const app = new Hono();
 app.use(
   '*',
   cors({
-    // 五中校园论坛是公开 API，不依赖 Cookie 鉴权（JWT 放在 Authorization header）。
+    // 广五校园论坛是公开 API，不依赖 Cookie 鉴权（JWT 放在 Authorization header）。
     // 放开 origin=* 可支持任意前端部署域名：Vercel / Netlify / Cloudflare Pages / 自定义域名 / GitHub Pages / localhost。
     // 这比维护一份白名单稳得多（否则每个新部署域名都要改 Worker 并重新 deploy）。
     origin: '*',

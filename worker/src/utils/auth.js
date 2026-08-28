@@ -104,7 +104,7 @@ export async function verifyPassword(password, storedHash) {
 // ==================== UID 校验 ====================
 export function isUidValid(uid) {
   // 新格式：YY(2) + Campus(1) + SchoolLevel(1) + Class(2) + StudentNo(2) = 8 位
-  // YY: 26, Campus: 1=五中本部 2=金碧校区, SchoolLevel: 1=初中 2=高中
+  // YY: 26, Campus: 1=广五本部 2=金碧校区, SchoolLevel: 1=初中 2=高中
   return typeof uid === 'string' && /^26[12][12]\d{4}$/.test(uid);
 }
 

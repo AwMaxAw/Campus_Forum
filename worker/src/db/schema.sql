@@ -1,8 +1,8 @@
--- 五中校园论坛数据库 schema
+-- 广五校园论坛数据库 schema
 -- D1 是 SQLite，语法按 SQLite 写
 -- 初始化: npx wrangler d1 execute campus-forum --remote --file=src/db/schema.sql
 
--- 用户表（UID 为主键，对应五中学号）
+-- 用户表（UID 为主键，对应广五学号）
 CREATE TABLE IF NOT EXISTS users (
   uid TEXT PRIMARY KEY,
   password_hash TEXT NOT NULL,
@@ -163,8 +163,8 @@ INSERT OR IGNORE INTO users (uid, password_hash, nickname, role) VALUES (
 -- 两条欢迎帖（作者 00000000）
 INSERT OR IGNORE INTO posts (author_uid, title, content, category, is_pinned, id) VALUES (
   '00000000',
-  '欢迎来到五中校园论坛',
-  '这是五中校园论坛的第一条帖子。当前阶段：✅ Cloudflare D1 数据库已建好，Worker 最小骨架部署成功。\n\n下一步：接入账号体系（注册/登录/JWT认证），让前端真的能发帖。',
+  '欢迎来到广五校园论坛',
+  '这是广五校园论坛的第一条帖子。当前阶段：✅ Cloudflare D1 数据库已建好，Worker 最小骨架部署成功。\n\n下一步：接入账号体系（注册/登录/JWT认证），让前端真的能发帖。',
   'meta',
   1,
   1
@@ -173,7 +173,7 @@ INSERT OR IGNORE INTO posts (author_uid, title, content, category, is_pinned, id
 INSERT OR IGNORE INTO posts (author_uid, title, content, category, is_pinned, id) VALUES (
   '00000000',
   '关于使用建议',
-  '请文明发言，遵守校规。本论坛仅限五中师生使用，发帖请勿包含真实姓名、电话等隐私信息。\n\n发现违规内容可以在帖子详情页举报，管理员会尽快处理。',
+  '请文明发言，遵守校规。本论坛仅限广五师生使用，发帖请勿包含真实姓名、电话等隐私信息。\n\n发现违规内容可以在帖子详情页举报，管理员会尽快处理。',
   'meta',
   1,
   2

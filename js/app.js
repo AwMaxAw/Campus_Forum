@@ -1,5 +1,5 @@
 /**
- * 五中校园论坛 - 前端主逻辑
+ * 广五校园论坛 - 前端主逻辑
  *
  * 路由（hash 路由，location.hash 变更触发 route()）：
  *   #home                封面页（欢迎页 + 动画占位，未登录也能看）
@@ -398,8 +398,8 @@ function renderCover(app) {
   const loggedIn = api.isLoggedIn();
   app.innerHTML = `
     <div class="cover-hero" style="text-align:center;padding:48px 20px 36px">
-      <h1 style="font-size:28px;margin-bottom:12px">五中校园论坛</h1>
-      <p style="font-size:15px;color:#6e6e73;margin-bottom:24px">属于五中人的交流空间</p>
+      <h1 style="font-size:28px;margin-bottom:12px">广五校园论坛</h1>
+      <p style="font-size:15px;color:#6e6e73;margin-bottom:24px">属于广五人的交流空间</p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         ${loggedIn
           ? `<button onclick="location.hash='forum'" style="padding:10px 28px;font-size:15px">进入广场 →</button>`
@@ -422,7 +422,7 @@ function renderAbout(app) {
 
     <div class="card">
       <h3 style="margin-top:0">一、站点性质</h3>
-      <p>本论坛（以下简称"本站"）由五中学生个人利用课余时间自发搭建与维护，属于<strong>非官方、非营利性</strong>的校园交流尝试。<strong>本站与广州市第五中学（以下简称"学校"）及其任何下属机构、社团、师生组织均无隶属、代理、合作或赞助关系</strong>，不代表学校立场，亦未获学校授权。站点名称中涉及"五中"字样仅为限定讨论圈层，不构成对学校名称权的主张。</p>
+      <p>本论坛（以下简称"本站"）由广五学生个人利用课余时间自发搭建与维护，属于<strong>非官方、非营利性</strong>的校园交流尝试。<strong>本站与广州市第五中学（以下简称"学校"）及其任何下属机构、社团、师生组织均无隶属、代理、合作或赞助关系</strong>，不代表学校立场，亦未获学校授权。站点名称中涉及"广五"字样仅为限定讨论圈层，不构成对学校名称权的主张。</p>
       <p>本站所有内容均由注册用户自行发布，<strong>本站及管理员仅提供信息存储与传输服务，不参与内容的编辑、采纳或背书</strong>。</p>
     </div>
 
@@ -489,7 +489,7 @@ function renderAbout(app) {
 
     <div class="card" style="background:linear-gradient(135deg,#f0f9ff 0%,#faf5ff 100%);border:1px solid #e0e7ff">
       <h3 style="margin-top:0">🧑‍💻 关于开发者</h3>
-      <p>本站由 <strong>Andrew</strong>（五中学生）独立开发与维护，属于个人课余项目。从前端到后端、从数据库到部署，全部由 Andrew 一人完成。</p>
+      <p>本站由 <strong>Andrew</strong>（广五学生）独立开发与维护，属于个人课余项目。从前端到后端、从数据库到部署，全部由 Andrew 一人完成。</p>
       <p style="margin-top:10px">
         <a href="https://andrewawa.netlify.app" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">
           🔗 访问开发者博客 →
@@ -506,7 +506,7 @@ function renderAbout(app) {
     </div>
 
     <div style="text-align:center;padding:20px 10px;color:#9ca3af;font-size:12px">
-      © 2026 五中校园论坛 · Made with ❤️ by Andrew · Powered by Cloudflare
+      © 2026 广五校园论坛 · Made with ❤️ by Andrew · Powered by Cloudflare
     </div>
   `;
 }
@@ -527,7 +527,7 @@ window.toggleFaq = function toggleFaq(i) {
 
 function renderFaq(app) {
   const faqs = [
-    { q: '这个论坛是学校官方的吗？', a: '不是。本站由五中学生 Andrew 利用课余时间独立开发与维护，属于非官方、非营利性的个人项目，与广州市第五中学无任何隶属或合作关系。' },
+    { q: '这个论坛是学校官方的吗？', a: '不是。本站由广五学生 Andrew 利用课余时间独立开发与维护，属于非官方、非营利性的个人项目，与广州市第五中学无任何隶属或合作关系。' },
     { q: '怎么注册账号？', a: '打开注册页面，选择你所在的校区和学段，设置昵称和密码即可。UID 格式为：年份（2位）+ 校区（1=本部/2=金碧）+ 学段（1=初中/2=高中）+ 班级（2位）+ 学号（2位）。例如 26110101 = 26年入学 · 本部 · 初中 · 01班 · 01号。' },
     { q: '忘记密码了怎么办？', a: '目前本站暂不支持自助找回密码功能。请通过私信联系管理员，提供你的 UID 进行身份核实后，管理员可以帮你重置密码。' },
     { q: '我发的帖子为什么没了？', a: '可能的原因：① 帖子触发了敏感内容审核，被管理员隐藏或删除；② 你自己删除了；③ 网络问题导致发布失败但误以为成功。如果是被误删，可以私信管理员申请恢复。' },
@@ -788,7 +788,7 @@ async function renderForum(app) {
     <div class="card search-panel" style="padding:12px 14px">
       <h3 style="margin:0 0 8px 0;font-size:14px">👤 搜索用户</h3>
       <div class="search-row" style="margin:0">
-        <input id="userSearchInput" placeholder="输入 UID 或昵称关键字（如 20260101、五中、数学）" onkeydown="if(event.key==='Enter')runUserSearch()">
+        <input id="userSearchInput" placeholder="输入 UID 或昵称关键字（如 20260101、广五、数学）" onkeydown="if(event.key==='Enter')runUserSearch()">
         <button onclick="runUserSearch()">🔎 搜用户</button>
         <button class="secondary" onclick="clearUserSearch()">🗑 清除</button>
       </div>
@@ -912,8 +912,8 @@ function renderRegister(app) {
         中的<span style="color:#dc2626">隐私条款</span>、用户责任与行为规范、未成年人保护等全部声明。
       </p>
       <p style="margin:6px 0 0;font-size:12px;color:#6b7280">
-        📌 UID 格式：<strong>26</strong>（年份）+ <strong>校区</strong>（1=五中本部 / 2=金碧校区）+ <strong>学段</strong>（1=初中 / 2=高中）+ <strong>班级</strong>（2位）+ <strong>学号</strong>（2位）= 共 8 位<br>
-        例如：26110101 = 26届 · 五中本部 · 初中 · 01班 · 01号
+        📌 UID 格式：<strong>26</strong>（年份）+ <strong>校区</strong>（1=广五本部 / 2=金碧校区）+ <strong>学段</strong>（1=初中 / 2=高中）+ <strong>班级</strong>（2位）+ <strong>学号</strong>（2位）= 共 8 位<br>
+        例如：26110101 = 26届 · 广五本部 · 初中 · 01班 · 01号
       </p>
     </div>
     <div class="card">
@@ -922,7 +922,7 @@ function renderRegister(app) {
       <div style="margin-bottom:12px">
         <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏫 校区</label>
         <select id="campusSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
-          <option value="1">五中本部</option>
+          <option value="1">广五本部</option>
           <option value="2">金碧校区</option>
         </select>
       </div>
@@ -2233,8 +2233,8 @@ async function renderAdminUsers(host) {
     const myUid = me && me.uid;
     const myRole = me && me.role;
 
-    // 按 UID 分组：261* → 五中本部，262* → 金碧校区，其他 → 其他
-    const isCampusA = u => /^261/.test(String(u.uid));   // 五中本部
+    // 按 UID 分组：261* → 广五本部，262* → 金碧校区，其他 → 其他
+    const isCampusA = u => /^261/.test(String(u.uid));   // 广五本部
     const isCampusB = u => /^262/.test(String(u.uid));   // 金碧校区
     const groupA = users.filter(isCampusA);
     const groupB = users.filter(isCampusB);
@@ -2268,7 +2268,7 @@ async function renderAdminUsers(host) {
 
     host.innerHTML = `
       <div style="font-size:12px;color:#6b7280;margin-bottom:10px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
-      ${groupTable('五中本部', '26 届学生账号 · 五中本部', groupA, '#1e40af')}
+      ${groupTable('广五本部', '26 届学生账号 · 广五本部', groupA, '#1e40af')}
       ${groupTable('金碧校区', '26 届学生账号 · 金碧校区', groupB, '#059669')}
       ${groupTable('其他', '非 26 开头的账号', groupC, '#6b7280')}
     `;
