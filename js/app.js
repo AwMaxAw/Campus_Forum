@@ -34,7 +34,14 @@ function normalizeNewlines(s) {
 function formatTime(iso) {
   if (!iso) return '';
   try {
-    const d = new Date(iso);
+    // 后端 datetime('now') 存的是 UTC，但返回格式是 "2026-08-28 12:00:00"（无 Z 后缀）。
+    // 不同浏览器对无后缀时间字符串的解析不一致：有的当本地时间，有的当 UTC。
+    // 统一显式标记为 UTC → 浏览器自动 getHours() 转为用户本地时间（北京时间 UTC+8）。
+    let fixed = String(iso).trim();
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(fixed) && !/[Zz]|[+-]\d{2}:?\d{2}$/.test(fixed)) {
+      fixed = fixed.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(fixed);
     if (isNaN(d.getTime())) return iso;
     const p = n => String(n).padStart(2,'0');
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
