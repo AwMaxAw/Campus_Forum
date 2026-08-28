@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-kv';
+import * as api from './api.js?v=20260827-images';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -34,6 +34,63 @@ function formatTime(iso) {
     const p = n => String(n).padStart(2,'0');
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   } catch { return iso; }
+}
+
+/**
+ * 图片压缩：使用 Canvas 将图片缩放到最大宽高 1280px，输出为 JPEG data URL。
+ * 输入: File 对象
+ * 输出: Promise<{ dataUrl, width, height, size, filename }>
+ * - dataUrl: "data:image/jpeg;base64,..."
+ * - width/height: 压缩后像素
+ * - size: 压缩后字节数
+ * 如果原图 ≤1280px 且 <1MB，直接返回原图（仅转为 JPEG 格式统一）
+ */
+function compressImage(file, maxDim = 1280, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = e => {
+      img.onload = () => {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        let newW = w, newH = h;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { newW = maxDim; newH = Math.round(h * maxDim / w); }
+          else { newH = maxDim; newW = Math.round(w * maxDim / h); }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = newW;
+        canvas.height = newH;
+        const ctx = canvas.getContext('2d');
+        // 白底（处理 PNG 透明背景）
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, newW, newH);
+        ctx.drawImage(img, 0, 0, newW, newH);
+        canvas.toBlob(
+          blob => {
+            if (!blob) { reject(new Error('Canvas 导出失败')); return; }
+            const reader2 = new FileReader();
+            reader2.onload = e2 => {
+              resolve({
+                dataUrl: e2.target.result,
+                width: newW,
+                height: newH,
+                size: blob.size,
+                filename: file.name,
+              });
+            };
+            reader2.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
 }
 
 // ==================== 分区元数据 ====================
@@ -167,6 +224,16 @@ function postCard(p, opts = {}) {
          ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${escapeHtml(JSON.stringify(t))})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
        </div>`
     : '';
+  // 图片缩略图预览
+  const imagesHtml = (Array.isArray(p.imageIds) && p.imageIds.length)
+    ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+         ${p.imageIds.slice(0, 4).map(id => {
+           const url = api.images.getUrl(id);
+           return `<img src="${escapeHtml(url)}" alt="图片" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb">`;
+         }).join('')}
+         ${p.imageIds.length > 4 ? `<span style="display:flex;align-items:center;justify-content:center;width:80px;height:80px;border-radius:6px;background:#f3f4f6;color:#6b7280;font-size:12px">+${p.imageIds.length - 4}</span>` : ''}
+       </div>`
+    : '';
   const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
   const clickable = opts.allowClick ? 'clickable' : '';
   const onclickAttr = opts.allowClick ? `onclick="location.hash='#detail/${p.id}'"` : '';
@@ -183,6 +250,7 @@ function postCard(p, opts = {}) {
       </div>
       <h3>${escapeHtml(p.title)}</h3>
       <p style="white-space:pre-wrap">${escapeHtml((p.content || '').slice(0, 140))}${(p.content || '').length > 140 ? '…' : ''}</p>
+      ${imagesHtml}
       ${tags}
       <div class="meta" style="margin-top:8px">${stats}</div>
     </div>
@@ -607,10 +675,11 @@ function renderRegister(app) {
   document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
 }
 
-// 发帖状态：标签数组 + 选中分区 key + 置顶
+// 发帖状态：标签数组 + 选中分区 key + 置顶 + 已上传图片
 let draftPostTags = [];
 let draftPostCategory = 'general';
 let draftPostPinned = false;
+let draftPostImages = [];  // [{ id, url, dataUrl, filename }]
 
 function renderPost(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
@@ -619,6 +688,7 @@ function renderPost(app) {
   draftPostTags = [];
   draftPostCategory = 'general';
   draftPostPinned = false;
+  draftPostImages = [];  // 重置图片
 
   // 分区下拉选项：meta 仅管理员可见
   const visibleCategories = CATEGORIES.filter(c => isAdmin || !c.adminOnly);
@@ -654,6 +724,18 @@ function renderPost(app) {
         <p class="hint" style="margin:2px 0 0 0">
           💡 输入 # 确认一个标签（最多 5 个，每个 ≤20 字）。分区用于大分类，标签用于细分话题。
         </p>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
+          🖼 图片（可选，最多 9 张，单张不超过 5MB）
+        </label>
+        <div id="imagePreviewList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+        <label id="imageUploadBtn" style="display:inline-flex;align-items:center;gap:4px;padding:6px 14px;border:1px solid #d2d2d7;border-radius:8px;cursor:pointer;font-size:13px;color:#424245;background:#f9fafb">
+          📷 选择图片
+          <input id="imageFileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple style="display:none">
+        </label>
+        <span id="imageUploadStatus" class="hint" style="margin-left:8px"></span>
       </div>
 
       ${isAdmin ? `
@@ -746,6 +828,73 @@ function renderPost(app) {
     setTimeout(addTagFromInput, 0);
   });
   renderChips();
+
+  // --- 图片上传逻辑 ---
+  const imageFileInput = document.getElementById('imageFileInput');
+  const imagePreviewList = document.getElementById('imagePreviewList');
+  const imageUploadStatus = document.getElementById('imageUploadStatus');
+
+  function renderImagePreviews() {
+    if (!imagePreviewList) return;
+    if (draftPostImages.length === 0) {
+      imagePreviewList.innerHTML = '';
+      return;
+    }
+    imagePreviewList.innerHTML = draftPostImages.map((img, idx) => {
+      const thumbUrl = img.url || img.dataUrl;
+      return `<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:1px solid #d2d2d7">
+        <img src="${escapeHtml(thumbUrl)}" style="width:100%;height:100%;object-fit:cover" alt="图片 ${idx + 1}">
+        <button type="button" data-img-idx="${idx}" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;background:rgba(0,0,0,0.6);color:#fff;font-size:12px;cursor:pointer;line-height:1">×</button>
+      </div>`;
+    }).join('');
+    // 绑定删除按钮
+    imagePreviewList.querySelectorAll('[data-img-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-img-idx'), 10);
+        draftPostImages.splice(idx, 1);
+        renderImagePreviews();
+      });
+    });
+  }
+
+  if (imageFileInput) {
+    imageFileInput.addEventListener('change', async () => {
+      const files = imageFileInput.files;
+      if (!files || files.length === 0) return;
+      if (draftPostImages.length + files.length > 9) {
+        imageUploadStatus.textContent = '最多 9 张图片，已自动截断';
+      }
+      const remaining = 9 - draftPostImages.length;
+      const toUpload = Array.from(files).slice(0, remaining);
+      imageUploadStatus.textContent = `正在上传 ${toUpload.length} 张图片...`;
+
+      for (const file of toUpload) {
+        try {
+          // 压缩
+          const compressed = await compressImage(file);
+          // 上传到服务端
+          const res = await api.images.upload(compressed.dataUrl, file.name);
+          if (res.success) {
+            draftPostImages.push({
+              id: res.data.id,
+              url: res.data.url,
+              dataUrl: compressed.dataUrl,
+              filename: res.data.filename || file.name,
+            });
+          } else {
+            console.warn('图片上传失败:', res.message);
+          }
+        } catch (err) {
+          console.warn('图片处理失败:', err.message);
+        }
+      }
+      imageUploadStatus.textContent = draftPostImages.length > 0
+        ? `✅ 已上传 ${draftPostImages.length} 张图片`
+        : '';
+      renderImagePreviews();
+      imageFileInput.value = ''; // 允许重复选同一文件
+    });
+  }
 }
 
 // ==================== 视图：帖子详情 + 评论区 + 楼中楼 + 点赞/收藏 ====================
@@ -768,6 +917,16 @@ async function renderDetail(app, postId) {
        </div>`
     : '';
 
+  // 图片展示
+  const imagesHtml = (Array.isArray(p.imageIds) && p.imageIds.length)
+    ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+         ${p.imageIds.map(id => {
+           const url = api.images.getUrl(id);
+           return `<img src="${escapeHtml(url)}" alt="图片" onclick="window.open('${escapeHtml(url)}','_blank')" style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer" title="点击查看原图">`;
+         }).join('')}
+       </div>`
+    : '';
+
   // 作者可点击进主页（头像+昵称）
   const detailAuthorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
   const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span></span>`;
@@ -784,6 +943,7 @@ async function renderDetail(app, postId) {
       </div>
       <h2>${escapeHtml(p.title)}</h2>
       <div class="detail-body">${escapeHtml(p.content)}</div>
+      ${imagesHtml}
       ${tagsHtml}
       <div class="action-bar">
         <button id="likeBtn" class="${p.isLiked ? 'active-like' : ''}">
@@ -2084,10 +2244,11 @@ window.doPost = async function doPost() {
   if (!title || !content) return alert('标题和内容不能为空');
   const tags = [...draftPostTags]; // 拷贝一份，防止发布中用户还在改 chip
   const category = String(draftPostCategory || 'general');
+  const imageIds = draftPostImages.map(img => img.id);
   const btn = document.getElementById('postBtn');
   btn.disabled = true; btn.textContent = '发布中...';
   try {
-    const r = await api.posts.create(title, content, tags, category, draftPostPinned);
+    const r = await api.posts.create(title, content, tags, category, draftPostPinned, imageIds);
     if (r.success) location.hash = 'forum';
     else alert(r.message || '发布失败');
   } finally {

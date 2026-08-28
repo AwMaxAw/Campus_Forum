@@ -48,6 +48,7 @@ import messagesRoutes from './routes/messages.js';
 import announcementsRoutes from './routes/announcements.js';
 import adminRoutes from './routes/admin.js';
 import usersRoutes from './routes/users.js';
+import imagesRoutes from './routes/images.js';
 
 const app = new Hono();
 
@@ -75,6 +76,7 @@ app.route('/api/messages', messagesRoutes);
 app.route('/api/announcements', announcementsRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/users', usersRoutes);
+app.route('/api/images', imagesRoutes);
 
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
@@ -90,6 +92,13 @@ app.use('*', async (c, next) => {
       if (r1 && r1.c === 0) {
         await c.env.DB.prepare('ALTER TABLE posts ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0').run();
       }
+      // posts.image_ids
+      const r1b = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('posts') WHERE name='image_ids'")
+        .first();
+      if (r1b && r1b.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE posts ADD COLUMN image_ids TEXT').run();
+      }
       // users.is_banned
       const r2 = await c.env.DB
         .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='is_banned'")
@@ -103,6 +112,30 @@ app.use('*', async (c, next) => {
         .first();
       if (r3 && r3.c === 0) {
         await c.env.DB.prepare('ALTER TABLE users ADD COLUMN last_login_at TEXT').run();
+      }
+      // images 表（若不存在则创建）
+      const r4 = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('images')")
+        .first();
+      if (r4 && r4.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id INTEGER,
+            author_uid TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            width INTEGER,
+            height INTEGER,
+            data BLOB NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (post_id) REFERENCES posts(id),
+            FOREIGN KEY (author_uid) REFERENCES users(uid)
+          )
+        `).run();
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_images_post ON images(post_id)').run();
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_images_author ON images(author_uid)').run();
       }
     } catch (e) {
       console.warn('[migrate] 自动迁移失败（可忽略，可能列已存在）：', e && e.message);

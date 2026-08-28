@@ -246,6 +246,37 @@ export const users = {
   },
 };
 
+// ======================== 图片 ========================
+export const images = {
+  /**
+   * 上传图片到 D1。
+   * imageDataUrl: data URL 格式（如 "data:image/png;base64,xxxx"）
+   * filename: 原始文件名（可选）
+   * 返回 { id, url, mimeType, size }
+   */
+  async upload(imageDataUrl, filename) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!imageDataUrl) return { success: false, message: '缺少图片数据' };
+    return request('/api/images', {
+      method: 'POST',
+      body: { image: imageDataUrl, filename: filename || 'image.png' },
+    });
+  },
+  /** 根据 ID 获取图片 URL（直接拼 URL，无需鉴权） */
+  getUrl(id) {
+    return `${API_BASE}/api/images/${encodeURIComponent(id)}`;
+  },
+  /** 删除图片 */
+  async remove(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/images/${id}`, { method: 'DELETE' });
+  },
+  /** 获取某帖子的全部图片（元数据列表，不含二进制数据） */
+  async listByPost(postId) {
+    return request(`/api/images/post/${postId}`, { needsAuth: false });
+  },
+};
+
 // ======================== 帖子 ========================
 export const posts = {
   /**
@@ -277,15 +308,17 @@ export const posts = {
     return this.list(page, pageSize, { author: userCache.uid });
   },
   /**
-   * 发新帖：分区 + 标签并存模式
+   * 发新帖：分区 + 标签并存模式 + 图片
    *   - category: 字符串（CATEGORIES key，前端发帖页必填显式选一个）
    *   - tags: 数组<string>（最多 5 个）
+   *   - imageIds: 数组<number>（已上传的图片 ID 列表，最多 9 张）
    * 后端会优先采用前端传的 category；如果不合法 → 管理员级校验不通过 → 再回退 general。
    */
-  async create(title, content, tags = [], category = 'general', isPinned = false) {
+  async create(title, content, tags = [], category = 'general', isPinned = false, imageIds = []) {
     if (!tokenCache) return { success: false, message: '请先登录' };
     if (!Array.isArray(tags)) tags = [];
-    return request('/api/posts', { method: 'POST', body: { title, content, tags, category, isPinned } });
+    if (!Array.isArray(imageIds)) imageIds = [];
+    return request('/api/posts', { method: 'POST', body: { title, content, tags, category, isPinned, imageIds } });
   },
   async remove(id) {
     return request(`/api/posts/${id}`, { method: 'DELETE' });

@@ -42,6 +42,14 @@ function parseTags(str) {
 
 function mapPostRow(row) {
   if (!row) return null;
+  // image_ids 是 JSON 数组字符串，解析成数字数组
+  let imageIds = [];
+  if (row.image_ids) {
+    try {
+      const parsed = JSON.parse(row.image_ids);
+      if (Array.isArray(parsed)) imageIds = parsed.map(Number).filter(n => Number.isFinite(n) && n > 0);
+    } catch {}
+  }
   return {
     id: row.id,
     title: row.title,
@@ -53,6 +61,7 @@ function mapPostRow(row) {
     authorUpdatedAt: row.author_updated_at || null,
     category: row.category,
     tags: parseTags(row.tags),
+    imageIds,
     viewCount: row.view_count,
     likeCount: row.like_count,
     commentCount: row.comment_count,
@@ -294,6 +303,15 @@ posts.post('/', requireAuth(), async (c) => {
     if (content.length > 2000) return fail('内容不能超过 2000 字');
     if (cleanTags.some(t => /["'\\<>{}]/.test(t))) return fail('标签不能包含特殊字符');
 
+    // 处理图片 ID 列表（最多 9 张）
+    let imageIds = [];
+    if (Array.isArray(body.imageIds)) {
+      imageIds = body.imageIds
+        .map(id => parseInt(id, 10))
+        .filter(id => Number.isFinite(id) && id > 0)
+        .slice(0, 9);
+    }
+
     // 置顶：仅管理员可在发帖时直接置顶；置顶帖自动排到现有置顶队列末尾（pin_order = MAX+1）
     const isPinned = isAdmin && !!body.isPinned;
     let pinOrder = 0;
@@ -303,8 +321,8 @@ posts.post('/', requireAuth(), async (c) => {
     }
 
     const result = await db
-      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, is_pinned, pin_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
-      .bind(uid, title, content, category, tagsStr, isPinned ? 1 : 0, pinOrder)
+      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, image_ids, is_pinned, pin_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
+      .bind(uid, title, content, category, tagsStr, imageIds.length > 0 ? JSON.stringify(imageIds) : null, isPinned ? 1 : 0, pinOrder)
       .run();
 
     const postId = result && result.meta && typeof result.meta.last_row_id === 'number'
@@ -372,9 +390,19 @@ posts.put('/:id', requireAuth(), async (c) => {
     }
 
     // 只更新这 4 个字段 + updated_at（created_at 保持不变）
+    // 处理图片 ID 列表
+    let imageIdsStr = null;
+    if (Array.isArray(body.imageIds)) {
+      const parsed = body.imageIds
+        .map(id => parseInt(id, 10))
+        .filter(id => Number.isFinite(id) && id > 0)
+        .slice(0, 9);
+      imageIdsStr = parsed.length > 0 ? JSON.stringify(parsed) : null;
+    }
+
     await db.prepare(
-      `UPDATE posts SET title = ?, content = ?, tags = ?, category = ?, updated_at = datetime('now') WHERE id = ?`
-    ).bind(title, content, tagsStr, category, id).run();
+      `UPDATE posts SET title = ?, content = ?, tags = ?, category = ?, image_ids = COALESCE(?, image_ids), updated_at = datetime('now') WHERE id = ?`
+    ).bind(title, content, tagsStr, category, imageIdsStr, id).run();
 
     const updated = await db
       .prepare(

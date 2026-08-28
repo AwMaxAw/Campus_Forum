@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS posts (
   content TEXT NOT NULL,
   tags TEXT,                               -- 逗号分隔，如 "学习,社团"
   category TEXT DEFAULT 'general',         -- 分区：general / study / club / life / meta
+  image_ids TEXT,                          -- JSON 数组，如 "[1,2,3]"，存关联的图片 id
   view_count INTEGER NOT NULL DEFAULT 0,
   like_count INTEGER NOT NULL DEFAULT 0,
   comment_count INTEGER NOT NULL DEFAULT 0,
@@ -32,6 +33,22 @@ CREATE TABLE IF NOT EXISTS posts (
   is_hidden INTEGER NOT NULL DEFAULT 0,    -- 0/1，是否被管理员隐藏
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (author_uid) REFERENCES users(uid)
+);
+
+-- 图片表（帖子图片，存 D1 BLOB）
+CREATE TABLE IF NOT EXISTS images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id INTEGER,                          -- 关联帖子 ID（可为空，上传时先存图片再关联帖子）
+  author_uid TEXT NOT NULL,                 -- 上传者 UID
+  filename TEXT NOT NULL,                   -- 原始文件名
+  mime_type TEXT NOT NULL,                  -- MIME 类型：image/png, image/jpeg, image/webp
+  size INTEGER NOT NULL,                    -- 图片字节数
+  width INTEGER,                            -- 宽度（像素）
+  height INTEGER,                           -- 高度（像素）
+  data BLOB NOT NULL,                       -- 图片二进制数据
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (post_id) REFERENCES posts(id),
   FOREIGN KEY (author_uid) REFERENCES users(uid)
 );
 
@@ -111,6 +128,8 @@ CREATE INDEX IF NOT EXISTS idx_comments_author ON comments(author_uid);
 CREATE INDEX IF NOT EXISTS idx_favorites_uid ON favorites(uid, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_from_to ON messages(from_uid, to_uid, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_to_read ON messages(to_uid, is_read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_images_post ON images(post_id);
+CREATE INDEX IF NOT EXISTS idx_images_author ON images(author_uid);
 
 -- ============ 种子数据：预置管理员用户 + 2 条欢迎帖 ============
 -- 注意：
