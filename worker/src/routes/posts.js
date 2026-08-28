@@ -49,6 +49,8 @@ function mapPostRow(row) {
     authorUid: row.author_uid,
     authorNickname: row.author_nickname || null,
     authorRole: row.author_role || null,
+    authorAvatarUrl: row.author_avatar_url || null,
+    authorUpdatedAt: row.author_updated_at || null,
     category: row.category,
     tags: parseTags(row.tags),
     viewCount: row.view_count,
@@ -77,6 +79,7 @@ posts.get('/', async (c) => {
     const dateFrom = (searchParams.get('date_from') || '').trim(); // YYYY-MM-DD
     const dateTo = (searchParams.get('date_to') || '').trim();     // YYYY-MM-DD
     const sortBy = searchParams.get('sort_by') || 'latest'; // latest | hot
+    const author = (searchParams.get('author') || '').trim(); // 按作者 UID 过滤（用户主页用）
     const offset = (page - 1) * pageSize;
 
     const db = c.env.DB;
@@ -86,6 +89,10 @@ posts.get('/', async (c) => {
     if (category) {
       whereParts.push('p.category = ?');
       params.push(category);
+    }
+    if (author && /^\d{1,8}$/.test(author)) {
+      whereParts.push('p.author_uid = ?');
+      params.push(author);
     }
     if (q) {
       whereParts.push('(p.title LIKE ? OR p.content LIKE ?)');
@@ -122,7 +129,7 @@ posts.get('/', async (c) => {
 
     const rows = await db
       .prepare(
-        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role, u.avatar_url AS author_avatar_url, u.updated_at AS author_updated_at
          FROM posts p
          LEFT JOIN users u ON u.uid = p.author_uid
          WHERE ${whereSQL}
@@ -189,7 +196,9 @@ posts.get('/:id', async (c) => {
       `UPDATE posts SET view_count = view_count + 1
        WHERE id = ? AND is_hidden = 0
        RETURNING *, (SELECT nickname FROM users WHERE uid = author_uid) AS author_nickname,
-                    (SELECT role FROM users WHERE uid = author_uid) AS author_role`
+                    (SELECT role FROM users WHERE uid = author_uid) AS author_role,
+                    (SELECT avatar_url FROM users WHERE uid = author_uid) AS author_avatar_url,
+                    (SELECT updated_at FROM users WHERE uid = author_uid) AS author_updated_at`
     )
     .bind(id)
     .first();

@@ -116,6 +116,7 @@ export function serializeUser(row) {
     avatarUrl: row.avatar_url || null,
     bio: row.bio || null,
     createdAt: row.created_at,
+    updatedAt: row.updated_at || null,
   };
 }
 

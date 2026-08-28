@@ -47,6 +47,7 @@ import favoritesRoutes from './routes/favorites.js';
 import messagesRoutes from './routes/messages.js';
 import announcementsRoutes from './routes/announcements.js';
 import adminRoutes from './routes/admin.js';
+import usersRoutes from './routes/users.js';
 
 const app = new Hono();
 
@@ -73,6 +74,7 @@ app.route('/api/favorites', favoritesRoutes);
 app.route('/api/messages', messagesRoutes);
 app.route('/api/announcements', announcementsRoutes);
 app.route('/api/admin', adminRoutes);
+app.route('/api/users', usersRoutes);
 
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。

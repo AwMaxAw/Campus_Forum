@@ -237,6 +237,15 @@ export function getAvatarUrl(user) {
   return null;
 }
 
+// ======================== 用户资料（公开主页）========================
+export const users = {
+  /** 取任意用户的公开主页资料：昵称/简介/头像/角色/注册时间/帖子数 */
+  async getProfile(uid) {
+    if (!uid) return { success: false, message: 'UID 无效' };
+    return request(`/api/users/${encodeURIComponent(uid)}`, { needsAuth: false });
+  },
+};
+
 // ======================== 帖子 ========================
 export const posts = {
   /**
@@ -249,6 +258,7 @@ export const posts = {
     if (f.category) qs.set('category', f.category);
     if (f.q) qs.set('q', f.q);
     if (f.tag) qs.set('tag', f.tag);
+    if (f.author) qs.set('author', f.author);       // 按作者 UID 过滤（用户主页用）
     if (f.dateFrom) qs.set('date_from', f.dateFrom); // YYYY-MM-DD
     if (f.dateTo)   qs.set('date_to', f.dateTo);
     if (f.sortBy)   qs.set('sort_by', f.sortBy);     // 'latest' | 'hot'
@@ -262,13 +272,9 @@ export const posts = {
     return request(`/api/posts/${id}`, { needsAuth: false });
   },
   async mine(page = 1, pageSize = 20) {
-    // 后端暂时没有 author_uid 筛选，拿 100 条前端过滤。如需加后端接口改 posts.list() 里的 whereParts 即可。
-    const res = await request('/api/posts?pageSize=100', { needsAuth: false });
-    if (res.success && userCache) {
-      res.data = res.data.filter(p => p.authorUid === userCache.uid);
-      if (res.pagination) res.pagination.total = res.data.length;
-    }
-    return res;
+    // 后端已支持 author 过滤，直接按当前用户 UID 查（支持分页）
+    if (!userCache) return { success: false, message: '请先登录' };
+    return this.list(page, pageSize, { author: userCache.uid });
   },
   /**
    * 发新帖：分区 + 标签并存模式

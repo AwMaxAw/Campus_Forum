@@ -89,7 +89,10 @@ async function renderTopBar() {
         : '';
     nav.innerHTML = `
       <span class="nav-right-group">
-        <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
+        <span class="nav-user" title="我的主页" onclick="location.hash='me'">
+          <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
+          <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
+        </span>
         <button class="secondary" onclick="doLogout()">退出</button>
       </span>
     `;
@@ -156,6 +159,9 @@ window.closeDrawer = closeDrawer;
 function postCard(p, opts = {}) {
   const author = p.authorNickname || `用户${p.authorUid}`;
   const time = formatTime(p.createdAt);
+  // 作者公开资料（头像+昵称）：点头像或昵称进作者主页，stopPropagation 防触发卡片跳详情
+  const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
+  const authorHtml = `<span class="post-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(authorUser)}</span><span class="post-author-name">${escapeHtml(author)}</span></span>`;
   const tags = (Array.isArray(p.tags) && p.tags.length)
     ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
          ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${escapeHtml(JSON.stringify(t))})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
@@ -171,7 +177,7 @@ function postCard(p, opts = {}) {
   return `
     <div class="card ${clickable}" ${onclickAttr} data-post-id="${p.id}">
       <div class="meta">
-        ${pinBadge}${catBadge}<span>${escapeHtml(author)}</span>
+        ${pinBadge}${catBadge}${authorHtml}
         <span>·</span>
         <span>${escapeHtml(time)}</span>
       </div>
@@ -701,13 +707,17 @@ async function renderDetail(app, postId) {
        </div>`
     : '';
 
+  // 作者可点击进主页（头像+昵称）
+  const detailAuthorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
+  const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span></span>`;
+
   app.innerHTML = `
     <div style="margin-bottom:10px">
       <button class="ghost" onclick="location.hash='forum'">← 返回列表</button>
     </div>
     <div class="card detail-header">
       <div class="meta">
-        ${pinBadge}${catBadge}<span>${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>
+        ${pinBadge}${catBadge}${detailAuthorHtml}
         <span>·</span><span>${escapeHtml(formatTime(p.createdAt))}</span>
         <span>·</span><span>👁 ${p.viewCount} 浏览</span>
       </div>
@@ -2001,6 +2011,47 @@ window.doPost = async function doPost() {
   }
 };
 
+// ==================== 视图：用户公开主页（点头像/昵称进入） ====================
+async function renderUserProfile(app, uid) {
+  app.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  let profile = null, postsRes = null;
+  try {
+    const [pr, pl] = await Promise.all([
+      api.users.getProfile(uid),
+      api.posts.list(1, 20, { author: uid }),
+    ]);
+    if (pr && pr.success) profile = pr.data;
+    if (pl && pl.success) postsRes = pl;
+  } catch {}
+
+  if (!profile) {
+    app.innerHTML = `<div class="card"><p>用户不存在或已注销。</p><button class="secondary" onclick="history.back()">← 返回</button></div>`;
+    return;
+  }
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+  const isMe = me && me.uid === profile.uid;
+  const header = `
+    <div class="profile-header" id="userProfileHeader">
+      <div class="avatar-lg">${buildAvatarInner(profile)}</div>
+      <div style="flex:1">
+        <div class="profile-name">${escapeHtml(profile.nickname)}${roleBadgeInline(profile.role)}${isMe ? ' <span style="color:#6b7280;font-size:12px;margin-left:6px">（这是你自己）</span>' : ''}</div>
+        <div class="profile-uid">UID：${escapeHtml(profile.uid)}　帖子数：${profile.postCount || 0}　注册于 ${escapeHtml(formatTime(profile.createdAt))}</div>
+        ${profile.bio ? `<div class="profile-bio">${escapeHtml(profile.bio)}</div>` : '<div class="profile-bio" style="opacity:0.6">这个人还没有写简介</div>'}
+        ${isMe ? `<div style="margin-top:8px"><button class="secondary" onclick="location.hash='me'">✏️ 去编辑我的资料</button></div>` : ''}
+      </div>
+    </div>
+  `;
+  const list = (postsRes && Array.isArray(postsRes.data) && postsRes.data.length)
+    ? postsRes.data.map(p => postCard(p, { allowClick: true })).join('')
+    : `<div class="empty">该用户还没有发过帖子</div>`;
+  app.innerHTML = `
+    ${header}
+    <div class="toolbar"><button class="secondary" onclick="history.back()">← 返回</button></div>
+    <h3 style="margin:8px 0">${escapeHtml(profile.nickname)} 发布的帖子</h3>
+    <div class="post-list">${list}</div>
+  `;
+}
+
 // ==================== 路由入口 ====================
 function route() {
   const raw = (location.hash || '').slice(1);
@@ -2015,6 +2066,7 @@ function route() {
   else if (path === 'post') renderPost(app);
   else if (path === 'detail' && seg2) renderDetail(app, parseInt(seg2, 10));
   else if (path === 'me') renderMe(app);
+  else if (path === 'user' && seg2) renderUserProfile(app, seg2);
   else if (path === 'messages') renderMessages(app);
   else if (path === 'announcements') renderAnnouncements(app);
   else if (path === 'about') renderAbout(app);
