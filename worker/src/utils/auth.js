@@ -103,7 +103,7 @@ export async function verifyPassword(password, storedHash) {
 
 // ==================== UID 校验 ====================
 export function isUidValid(uid) {
-  return typeof uid === 'string' && /^\d{8}$/.test(uid);
+  return typeof uid === 'string' && /^2026\d{4}$/.test(uid);
 }
 
 // ==================== 用户序列化（返回给前端的用户对象） ====================

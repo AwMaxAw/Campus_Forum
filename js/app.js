@@ -511,7 +511,7 @@ function renderLogin(app) {
   app.innerHTML = `
     <div class="card">
       <h3>登录</h3>
-      <input id="uidInput" placeholder="用户UID（8位数字）" maxlength="8" inputmode="numeric">
+      <input id="uidInput" placeholder="UID（2026 + 班级2位 + 学号2位，共8位数字）" maxlength="8" inputmode="numeric">
       <input id="pwdInput" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
       <button id="loginBtn" onclick="doLogin()">登录</button>
       <p class="hint">
@@ -525,16 +525,27 @@ function renderLogin(app) {
 
 function renderRegister(app) {
   app.innerHTML = `
+    <div class="card" style="background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:14px">
+      <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.6">
+        📢 <strong>注册前必读：</strong>请先阅读
+        <a href="#about" target="_blank" onclick="event.stopPropagation()" style="color:#2563eb">《关于本站》</a>
+        中的<span style="color:#dc2626">隐私条款</span>、用户责任与行为规范、未成年人保护等全部声明。
+      </p>
+      <p style="margin:6px 0 0;font-size:12px;color:#6b7280">
+        📌 UID 格式：<strong>2026</strong>（年份）+ <strong>班级</strong>（2位）+ <strong>学号</strong>（2位）= 共 8 位数字<br>
+        例如：20260101 表示 2026 届 1 班 1 号
+      </p>
+    </div>
     <div class="card">
       <h3>注册新账号</h3>
-      <input id="uidInput" placeholder="UID（8位数字，一般是你的学号）" maxlength="8" inputmode="numeric">
+      <input id="uidInput" placeholder="UID：2026 + 班级(2位) + 学号(2位)，共8位数字" maxlength="8" inputmode="numeric">
       <input id="pwdInput" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password">
       <input id="pwd2Input" type="password" placeholder="再次输入密码" autocomplete="new-password">
       <input id="nickInput" placeholder="昵称（1-20字，可选）" maxlength="20">
       <textarea id="bioInput" placeholder="个人简介（可选，200字内）" maxlength="200" style="min-height:60px"></textarea>
       <label style="display:flex;align-items:flex-start;gap:8px;margin:0 0 8px;font-size:13px;line-height:1.5;cursor:pointer">
         <input id="agreeInput" type="checkbox" style="margin-top:3px;width:auto;flex:0 0 auto">
-        <span>我已阅读并同意 <a href="#about" target="_blank" onclick="event.stopPropagation()">《关于本站》</a> 中的全部声明（含站点性质、用户责任与行为规范、内容免责、侵权处理、未成年人保护、知识产权等条款）。</span>
+        <span>我已阅读并同意 <a href="#about" target="_blank" onclick="event.stopPropagation()">《关于本站》</a> 中的全部声明（含隐私条款、站点性质、用户责任与行为规范、内容免责、侵权处理、未成年人保护、知识产权等）。</span>
       </label>
       <button id="regBtn" onclick="doRegister()">注册</button>
       <p class="hint">
@@ -1343,7 +1354,7 @@ async function renderMessages(app) {
 
 window.startNewConversation = function startNewConversation() {
   const uid = (document.getElementById('newDmUid').value || '').trim();
-  if (!/^\d{8}$/.test(uid)) { alert('请输入 8 位数字 UID'); return; }
+  if (!/^2026\d{4}$/.test(uid)) { alert('UID 必须是 8 位数字，且以 2026 开头'); return; }
   if (api.isLoggedIn() && uid === api.getCurrentUser().uid) { alert('不能和自己对话'); return; }
   openConversation(uid);
 };
@@ -1442,9 +1453,18 @@ async function renderAdmin(app) {
   app.innerHTML = `
     <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#b45309">🛡 管理员面板</span></div>
 
-    <!-- 板块1：已注册账号 -->
+    <!-- 五中本部 大标题 -->
+    <div style="background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;border-radius:12px;padding:18px 24px;margin-bottom:16px;display:flex;align-items:center;gap:14px">
+      <div style="font-size:32px">🏫</div>
+      <div>
+        <div style="font-size:20px;font-weight:700;letter-spacing:1px">五中本部</div>
+        <div style="font-size:13px;opacity:.85;margin-top:2px">广州市第五中学 · 校本部 · 2026 届学生账号</div>
+      </div>
+    </div>
+
+    <!-- 板块1：已注册账号（五中本部） -->
     <div class="card">
-      <h3 style="margin-top:0">👤 已注册账号</h3>
+      <h3 style="margin-top:0">👤 五中本部 · 已注册账号</h3>
       <div id="adminUsers">🔄 加载中...</div>
     </div>
 
@@ -1880,7 +1900,7 @@ async function popupUnreadAnnouncements() {
 window.doLogin = async function doLogin() {
   const uid = document.getElementById('uidInput').value.trim();
   const password = document.getElementById('pwdInput').value;
-  if (!/^\d{8}$/.test(uid)) return alert('请输入 8 位数字 UID');
+  if (!/^2026\d{4}$/.test(uid)) return alert('UID 必须是 8 位数字，且以 2026 开头');
   if (!password) return alert('请输入密码');
   const btn = document.getElementById('loginBtn');
   btn.disabled = true; btn.textContent = '登录中...';
@@ -1900,7 +1920,7 @@ window.doRegister = async function doRegister() {
   const confirm = document.getElementById('pwd2Input').value;
   const nickname = (document.getElementById('nickInput').value || '').trim();
   const bio = (document.getElementById('bioInput').value || '').trim();
-  if (!/^\d{8}$/.test(uid)) return alert('请输入 8 位数字 UID');
+  if (!/^2026\d{4}$/.test(uid)) return alert('UID 必须是 8 位数字，且以 2026 开头（格式：2026 + 班级2位 + 学号2位）');
   if (pwd.length < 6) return alert('密码至少 6 位');
   if (pwd !== confirm) return alert('两次输入的密码不一致');
   if (!document.getElementById('agreeInput').checked) return alert('请先阅读并勾选同意《关于本站》中的声明后再注册');
