@@ -15,7 +15,7 @@
  *     覆盖下面的默认值（会被读取，见 const API_BASE = ...）。
  */
 
-const DEFAULT_API_BASE = 'https://campus-forum.max-li-ggm.workers.dev';
+const DEFAULT_API_BASE = '';  // 空 = 同域相对路径，由 Cloudflare Pages Functions 代理到 Worker
 const API_BASE = (typeof window !== 'undefined' && window.__CAMPUS_FORUM_API_BASE__)
   ? window.__CAMPUS_FORUM_API_BASE__.replace(/\/$/, '')
   : DEFAULT_API_BASE;
