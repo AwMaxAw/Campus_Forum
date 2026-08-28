@@ -45,11 +45,15 @@ feedbacks.post('/', requireAuth(), async (c) => {
       .bind(uid, content)
       .run();
 
+    // Cloudflare D1 返回的自增 ID 在 meta.last_row_id 中
+    const newId = info.meta && info.meta.last_row_id;
+    if (!newId) return fail('写入失败', 500);
+
     const row = await db
-      .prepare(`SELECT f.id, f.content, f.created_at, u.nickname, u.avatar_url, u.role
+      .prepare(`SELECT f.id, f.content, f.created_at, f.author_uid, u.nickname, u.avatar_url, u.role
                 FROM feedbacks f LEFT JOIN users u ON u.uid = f.author_uid
                 WHERE f.id = ?`)
-      .bind(info.lastInsertRowid)
+      .bind(newId)
       .first();
 
     return c.json(ok(mapFeedbackRow(row)));
