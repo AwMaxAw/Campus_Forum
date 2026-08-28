@@ -511,7 +511,7 @@ function renderLogin(app) {
   app.innerHTML = `
     <div class="card">
       <h3>登录</h3>
-      <input id="uidInput" placeholder="UID（2026 + 班级2位 + 学号2位，共8位数字）" maxlength="8" inputmode="numeric">
+      <input id="uidInput" placeholder="用户UID（8位数字）" maxlength="8" inputmode="numeric">
       <input id="pwdInput" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
       <button id="loginBtn" onclick="doLogin()">登录</button>
       <p class="hint">
@@ -1354,7 +1354,7 @@ async function renderMessages(app) {
 
 window.startNewConversation = function startNewConversation() {
   const uid = (document.getElementById('newDmUid').value || '').trim();
-  if (!/^2026\d{4}$/.test(uid)) { alert('UID 必须是 8 位数字，且以 2026 开头'); return; }
+  if (!/^\d{8}$/.test(uid)) { alert('请输入 8 位数字 UID'); return; }
   if (api.isLoggedIn() && uid === api.getCurrentUser().uid) { alert('不能和自己对话'); return; }
   openConversation(uid);
 };
@@ -1900,7 +1900,7 @@ async function popupUnreadAnnouncements() {
 window.doLogin = async function doLogin() {
   const uid = document.getElementById('uidInput').value.trim();
   const password = document.getElementById('pwdInput').value;
-  if (!/^2026\d{4}$/.test(uid)) return alert('UID 必须是 8 位数字，且以 2026 开头');
+  if (!/^\d{8}$/.test(uid)) return alert('请输入 8 位数字 UID');
   if (!password) return alert('请输入密码');
   const btn = document.getElementById('loginBtn');
   btn.disabled = true; btn.textContent = '登录中...';

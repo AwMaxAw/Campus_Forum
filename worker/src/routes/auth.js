@@ -100,7 +100,7 @@ auth.post('/login', async (c) => {
 
     const uid = (body.uid || '').trim();
     const password = (body.password || '').toString();
-    if (!isUidValid(uid)) return fail('UID 必须是 8 位数字，且以 2026 开头');
+    if (!/^\d{8}$/.test(uid)) return fail('请输入 8 位数字 UID');
     if (!password) return fail('请输入密码');
 
     const user = await db
