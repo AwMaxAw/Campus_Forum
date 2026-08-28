@@ -277,4 +277,98 @@ admin.get('/posts', requireAdmin(), async (c) => {
   }
 });
 
+// ==================== 带图片的帖子列表（管理员专用，紧凑预览）====================
+admin.get('/posts-with-images', requireAdmin(), async (c) => {
+  try {
+    const db = c.env.DB;
+    // 查出所有有 image_ids 的帖子
+    const rows = await db
+      .prepare(
+        `SELECT p.id, p.title, p.author_uid, p.category, p.tags, p.image_ids, p.created_at,
+                u.nickname AS author_nickname
+         FROM posts p
+         LEFT JOIN users u ON u.uid = p.author_uid
+         WHERE p.is_hidden = 0 AND p.image_ids IS NOT NULL AND p.image_ids <> '' AND p.image_ids <> '[]'
+         ORDER BY p.created_at DESC
+         LIMIT 500`
+      )
+      .all();
+
+    const data = [];
+    for (const r of rows.results || []) {
+      // 解析 image_ids JSON，取第一张图的 id 作为缩略图
+      let imageIds = [];
+      try {
+        const parsed = JSON.parse(r.image_ids);
+        if (Array.isArray(parsed)) imageIds = parsed.map(Number).filter(n => Number.isFinite(n) && n > 0);
+      } catch {}
+
+      // 取第一张图片的元信息（mime_type）用于前端正确显示
+      let firstImage = null;
+      if (imageIds.length > 0) {
+        const img = await db
+          .prepare('SELECT id, mime_type, size FROM images WHERE id = ?')
+          .bind(imageIds[0])
+          .first();
+        if (img) firstImage = { id: img.id, mimeType: img.mime_type, size: img.size };
+      }
+
+      data.push({
+        id: r.id,
+        title: r.title,
+        authorUid: r.author_uid,
+        authorNickname: r.author_nickname || null,
+        category: r.category,
+        tags: parseTags(r.tags),
+        imageIds,
+        imageCount: imageIds.length,
+        firstImage,
+        createdAt: r.created_at,
+      });
+    }
+
+    return c.json(ok(data, { total: data.length }));
+  } catch (e) {
+    return fail(`[admin posts-with-images] ${e.name}: ${e.message}`, 500);
+  }
+});
+
+// ==================== 删除帖子（管理员，连带删除图片记录）====================
+admin.delete('/posts/:id', requireAdmin(), async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id) || id <= 0) return fail('帖子 ID 无效');
+
+    const db = c.env.DB;
+    const post = await db.prepare('SELECT id, author_uid, image_ids FROM posts WHERE id = ?').bind(id).first();
+    if (!post) return fail('帖子不存在', 404);
+
+    // 删除关联的图片记录
+    if (post.image_ids) {
+      try {
+        const ids = JSON.parse(post.image_ids);
+        if (Array.isArray(ids) && ids.length > 0) {
+          const stmts = ids.map(imgId =>
+            db.prepare('DELETE FROM images WHERE id = ?').bind(Number(imgId))
+          );
+          await db.batch(stmts);
+        }
+      } catch {}
+    }
+
+    // 删除帖子及其关联数据
+    const stmts = [
+      db.prepare('DELETE FROM post_likes WHERE post_id = ?').bind(id),
+      db.prepare('DELETE FROM favorites WHERE post_id = ?').bind(id),
+      db.prepare('DELETE FROM comments WHERE post_id = ?').bind(id),
+      db.prepare('DELETE FROM posts WHERE id = ?').bind(id),
+    ];
+    await db.batch(stmts);
+
+    return c.json(ok({ id, deleted: true }));
+  } catch (e) {
+    return fail(`[admin delete post] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 export default admin;

@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260827-images';
+import * as api from './api.js?v=20260828-admin-images';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -1685,6 +1685,13 @@ async function renderAdmin(app) {
       <div id="adminPinned">🔄 加载中...</div>
     </div>
 
+    <!-- 板块3.5：带图片帖区（紧凑行布局，方便批量删除） -->
+    <div class="card">
+      <h3 style="margin-top:0">🖼 带图片帖区</h3>
+      <p class="hint">所有包含图片的帖子一行一行紧密排列，点击可查看详情，右侧按钮可直接删除。</p>
+      <div id="adminImagePosts">🔄 加载中...</div>
+    </div>
+
     <!-- 板块4：其他帖子列表（非置顶，按时间倒序，点击可进详情） -->
     <div class="card">
       <h3 style="margin-top:0">📄 其他帖子</h3>
@@ -1723,6 +1730,67 @@ async function renderAdmin(app) {
       _adminPinOrder = _adminPinPosts.map(p => p.id);
       renderAdminPinList();
     } catch (e) { document.getElementById('adminPinned').innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块3.5：带图片帖区（紧凑行布局）---
+  (async () => {
+    const host = document.getElementById('adminImagePosts');
+    try {
+      const r = await api.admin.postsWithImages();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = r.data || [];
+      if (list.length === 0) { host.innerHTML = `<span class="hint">暂无带图片的帖子</span>`; return; }
+      host.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${list.length} 条带图片帖子</div>
+        ${list.map(p => {
+          const author = p.authorNickname || `用户${p.authorUid}`;
+          const firstImgUrl = p.firstImage ? api.images.getUrl(p.firstImage.id) : '';
+          const tagHtml = (Array.isArray(p.tags) && p.tags.length)
+            ? p.tags.slice(0, 3).map(t => `<span class="tag-chip" style="font-size:11px;padding:0 5px">#${escapeHtml(t)}</span>`).join('')
+            : '';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px">
+            ${firstImgUrl ? `<img src="${escapeHtml(firstImgUrl)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex-shrink:0" alt="缩略图">` : `<div style="width:44px;height:44px;background:#f3f4f6;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px">🖼</div>`}
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+              <div style="display:flex;align-items:center;gap:6px">
+                ${categoryBadgeHtml(p.category)}
+                <a href="#detail/${p.id}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
+                ${p.imageCount > 1 ? `<span style="font-size:11px;color:#6b7280;background:#f3f4f6;padding:0 5px;border-radius:4px;flex-shrink:0">${p.imageCount}张</span>` : ''}
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;overflow:hidden">
+                <span style="flex-shrink:0">${escapeHtml(author)}</span>
+                <span style="flex-shrink:0">·</span>
+                <span style="flex-shrink:0">${escapeHtml(formatTime(p.createdAt))}</span>
+                <div style="display:flex;gap:3px;overflow:hidden">${tagHtml}</div>
+              </div>
+            </div>
+            <button data-del-post="${p.id}" style="flex-shrink:0;padding:4px 10px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:12px;cursor:pointer" title="删除此帖（连带图片）">🗑 删除</button>
+          </div>`;
+        }).join('')}`;
+      // 绑定删除按钮
+      host.querySelectorAll('[data-del-post]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const postId = parseInt(btn.getAttribute('data-del-post'), 10);
+          if (!confirm(`确定删除帖子 #${postId}？\n将连带删除该帖的全部图片、评论、点赞等数据，不可恢复！`)) return;
+          btn.disabled = true; btn.textContent = '删除中...';
+          try {
+            const res = await api.admin.deletePost(postId);
+            if (res.success) {
+              btn.closest('[data-del-post]')?.parentElement?.remove();
+              // 刷新计数
+              const remaining = host.querySelectorAll('[data-del-post]').length;
+              const countEl = host.querySelector('div[style*="margin-bottom:8px"]');
+              if (countEl) countEl.textContent = remaining > 0 ? `共 ${remaining} 条带图片帖子` : '暂无带图片的帖子';
+              if (remaining === 0) host.innerHTML = `<span class="hint">暂无带图片的帖子</span>`;
+            } else {
+              alert('删除失败：' + (res.message || '未知错误'));
+              btn.disabled = false; btn.textContent = '🗑 删除';
+            }
+          } catch (e) {
+            alert('删除出错：' + e.message);
+            btn.disabled = false; btn.textContent = '🗑 删除';
+          }
+        });
+      });
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
   })();
 
   // --- 板块4：其他帖子（非置顶，只读列表）---

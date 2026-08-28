@@ -443,6 +443,17 @@ export const admin = {
     if (!tokenCache) return { success: false, message: '请先登录' };
     return request('/api/admin/tags');
   },
+  /** 带图片的帖子列表（管理员专用） */
+  async postsWithImages() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin/posts-with-images');
+  },
+  /** 删除帖子（管理员，连带图片记录） */
+  async deletePost(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少帖子 id' };
+    return request(`/api/admin/posts/${id}`, { method: 'DELETE' });
+  },
   /** 封禁账号（危险操作，前端需二次确认） */
   async banUser(uid) {
     if (!tokenCache) return { success: false, message: '请先登录' };
