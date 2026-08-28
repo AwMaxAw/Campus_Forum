@@ -15,7 +15,7 @@
  *     覆盖下面的默认值（会被读取，见 const API_BASE = ...）。
  */
 
-const DEFAULT_API_BASE = 'https://gzwzcampusforum.max-li-ggm.workers.dev';
+const DEFAULT_API_BASE = 'https://campus-forum.max-li-ggm.workers.dev';
 const API_BASE = (typeof window !== 'undefined' && window.__CAMPUS_FORUM_API_BASE__)
   ? window.__CAMPUS_FORUM_API_BASE__.replace(/\/$/, '')
   : DEFAULT_API_BASE;
