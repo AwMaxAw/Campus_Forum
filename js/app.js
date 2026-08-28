@@ -181,12 +181,14 @@ function renderDrawer(loggedIn, me, unreadMsg) {
         { label: '我的',     icon: '👤', hash: 'me' },
         { label: '公告',     icon: '📋', hash: 'announcements' },
         { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
+        { label: 'FAQ',      icon: '❓', hash: 'faq' },
         { label: '关于本站', icon: 'ℹ️', hash: 'about' },
         ...(isAdmin ? [{ label: '管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
       ]
     : [
         { label: '首页',     icon: '🏠', hash: 'home' },
         { label: '公告',     icon: '📋', hash: 'announcements' },
+        { label: 'FAQ',      icon: '❓', hash: 'faq' },
         { label: '关于本站', icon: 'ℹ️', hash: 'about' },
       ];
 
@@ -484,6 +486,84 @@ function renderAbout(app) {
     <div class="card" style="background:#fef3c7;border:1px solid #fde68a">
       <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ 特别提示：</strong>继续访问或使用本站任何功能，即视为您已充分阅读、理解并自愿接受本声明全部条款，并自愿承担相应风险与责任。如您不同意，请立即停止使用并关闭本页。</p>
     </div>
+
+    <div class="card" style="background:linear-gradient(135deg,#f0f9ff 0%,#faf5ff 100%);border:1px solid #e0e7ff">
+      <h3 style="margin-top:0">🧑‍💻 关于开发者</h3>
+      <p>本站由 <strong>Andrew</strong>（五中学生）独立开发与维护，属于个人课余项目。从前端到后端、从数据库到部署，全部由 Andrew 一人完成。</p>
+      <p style="margin-top:10px">
+        <a href="https://andrewawa.netlify.app" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">
+          🔗 访问开发者博客 →
+        </a>
+      </p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">🔗 友情链接</h3>
+      <ul>
+        <li><a href="https://andrewawa.netlify.app" target="_blank" rel="noopener">Andrew 的个人博客</a> — 开发者的技术分享与日常记录</li>
+      </ul>
+      <p style="color:#6b7280;font-size:12px">欢迎与本站交换友情链接，请通过私信联系管理员。</p>
+    </div>
+
+    <div style="text-align:center;padding:20px 10px;color:#9ca3af;font-size:12px">
+      © 2026 五中校园论坛 · Made with ❤️ by Andrew · Powered by Cloudflare
+    </div>
+  `;
+}
+
+// ==================== 视图：常见问题与解答 FAQ ====================
+function renderFaq(app) {
+  const faqs = [
+    { q: '这个论坛是学校官方的吗？', a: '不是。本站由五中学生 Andrew 利用课余时间独立开发与维护，属于非官方、非营利性的个人项目，与广州市第五中学无任何隶属或合作关系。' },
+    { q: '怎么注册账号？', a: '打开注册页面，选择你所在的校区和学段，设置昵称和密码即可。UID 格式为：年份（2位）+ 校区（1=本部/2=金碧）+ 学段（1=初中/2=高中）+ 班级（2位）+ 学号（2位）。例如 26110101 = 26年入学 · 本部 · 初中 · 01班 · 01号。' },
+    { q: '忘记密码了怎么办？', a: '目前本站暂不支持自助找回密码功能。请通过私信联系管理员，提供你的 UID 进行身份核实后，管理员可以帮你重置密码。' },
+    { q: '我发的帖子为什么没了？', a: '可能的原因：① 帖子触发了敏感内容审核，被管理员隐藏或删除；② 你自己删除了；③ 网络问题导致发布失败但误以为成功。如果是被误删，可以私信管理员申请恢复。' },
+    { q: '可以发广告或者推广自己的社团吗？', a: '社团招新、活动宣传这类和校园生活相关的内容是可以发的，建议发到「生活」或对应分区并加上合适的标签。但商业广告、外部产品推广、引流到其他平台是不允许的，管理员会直接删除。' },
+    { q: '怎么删除自己发过的帖子或评论？', a: '打开帖子详情页，如果你是帖子作者，会看到「删除」按钮。评论也支持作者自己删除。如果你找不到删除按钮，可能是网络问题，请刷新页面试试。' },
+    { q: '如何保护自己的隐私？', a: '请不要在帖子、评论或私信中公开自己或他人的真实姓名、身份证号、电话号码、家庭住址、具体班级学号等个人隐私信息。也不要把账号密码告诉任何人。遇到骚扰或隐私泄露，请立即联系管理员。' },
+    { q: '管理员的权力有多大？', a: '管理员可以隐藏/删除违规帖子和评论、封禁违规账号、管理置顶帖。管理员不会查看你的私信内容（除非涉及违法或你主动举报）。管理员滥用权力的行为可以私信向开发者举报。' },
+    { q: '论坛是怎么运行的？会突然关掉吗？', a: '本站托管在 Cloudflare 的免费服务上（Pages + Workers + D1），不保证永久在线。如果 Cloudflare 停服、开发者毕业或时间精力不足，论坛可能随时停掉。建议把重要内容备份到本地。' },
+    { q: '我想给论坛提建议或帮忙，怎么联系？', a: '可以在站内私信管理员，或者通过「关于本站」页面里的友情链接访问开发者博客联系 Andrew。欢迎任何形式的反馈、建议和技术贡献！' },
+  ];
+
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600">❓ 常见问题与解答</span></div>
+
+    <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,#fef9c3 0%,#fef3c7 100%);border:1px solid #fde68a">
+      <p style="margin:0;font-size:14px;color:#92400e">💡 这里整理了大家最常问的问题。如果你没有找到答案，可以私信管理员或在广场发帖询问。</p>
+    </div>
+
+    ${faqs.map((f, i) => `
+      <div class="card" style="margin-bottom:8px;cursor:pointer" onclick="toggleFaq(${i})">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600;color:#1f2937">
+          <span style="color:#2563eb">Q${i + 1}.</span>
+          <span>${escapeHtml(f.q)}</span>
+          <span id="faqArrow${i}" style="margin-left:auto;color:#9ca3af;transition:transform 0.2s">▼</span>
+        </div>
+        <div id="faqAns${i}" style="display:none;margin-top:10px;padding:10px 12px;background:#f9fafb;border-radius:8px;font-size:14px;color:#374151;line-height:1.7">
+          <strong style="color:#059669">A:</strong> ${escapeHtml(f.a)}
+        </div>
+      </div>
+    `).join('')}
+
+    <div class="card" style="margin-top:16px;text-align:center">
+      <p style="margin:0;color:#6b7280">还有其他问题？欢迎 <a href="#messages" style="color:#2563eb">私信管理员</a> 或查看 <a href="#about" style="color:#2563eb">关于本站</a>。</p>
+    </div>
+
+    <script>
+      function toggleFaq(i) {
+        const ans = document.getElementById('faqAns' + i);
+        const arrow = document.getElementById('faqArrow' + i);
+        if (!ans || !arrow) return;
+        if (ans.style.display === 'none') {
+          ans.style.display = 'block';
+          arrow.style.transform = 'rotate(180deg)';
+        } else {
+          ans.style.display = 'none';
+          arrow.style.transform = 'rotate(0deg)';
+        }
+      }
+    </script>
   `;
 }
 
@@ -2484,6 +2564,7 @@ function route() {
     renderMessages(app, peerUid, peerName);
   }
   else if (path === 'announcements') renderAnnouncements(app);
+  else if (path === 'faq') renderFaq(app);
   else if (path === 'about') renderAbout(app);
   else if (path === 'admin') renderAdmin(app);
   else if (path === 'forum') renderForum(app);
