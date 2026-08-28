@@ -145,6 +145,57 @@ auth.post('/login', async (c) => {
   }
 });
 
+// ==================== 管理员免密快速登录（需要 MASTER_KEY + 管理员 UID）====================
+// curl -X POST https://your-worker.workers.dev/api/auth/quick-login \
+//   -H "Content-Type: application/json" \
+//   -d '{"uid":"00000000","masterKey":"xxxxx"}'
+auth.post('/quick-login', async (c) => {
+  try {
+    const masterKey = c.env.MASTER_KEY;
+    if (!masterKey) return fail('快速登录未配置（服务端缺少 MASTER_KEY）', 503);
+
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+
+    const uid = (body.uid || '').trim();
+    const key = (body.masterKey || '').toString();
+
+    if (!uid) return fail('请输入管理员 UID');
+    if (key !== masterKey) return fail('master key 不正确', 401);
+
+    const db = c.env.DB;
+    const user = await db.prepare('SELECT * FROM users WHERE uid = ?').bind(uid).first();
+    if (!user) return fail('用户不存在', 404);
+
+    // 只允许管理员角色免密登录
+    if (user.role !== 'dev_admin' && user.role !== 'admin') {
+      return fail('该 UID 不是管理员，不可使用快速登录', 403);
+    }
+
+    if (user.is_banned) return fail('该账号已被封禁', 403);
+
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      sub: user.uid,
+      role: user.role,
+      iat: now,
+      exp: now + JWT_TTL_SEC,
+    };
+    const token = await sign(payload, c.env.JWT_SECRET, 'HS256');
+
+    try {
+      await db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE uid = ?").bind(user.uid).run();
+    } catch {}
+
+    return c.json(ok(serializeUser(user), {
+      token,
+      tokenExpiresAt: new Date((now + JWT_TTL_SEC) * 1000).toISOString(),
+    }));
+  } catch (e) {
+    return fail(`[quick-login] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 // ==================== 当前用户（JWT 中间件保护） ====================
 auth.get('/me', requireAuth(), async (c) => {
   try {
