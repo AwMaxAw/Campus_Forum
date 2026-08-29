@@ -620,12 +620,24 @@ async function renderCalendar(app) {
   const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
   const weekDays = ['周一','周二','周三','周四','周五','周六','周日'];
 
+  // 年份下拉：当前年前后各 5 年，便于跳转
+  const thisYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 11 }, (_, i) => thisYear - 5 + i);
+  const monthOptions = monthNames.map((name, i) => ({ value: i + 1, label: name }));
+
   app.innerHTML = `
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-        <button class="secondary" id="calPrev" style="padding:4px 12px">‹ 上月</button>
-        <span style="font-size:18px;font-weight:600">${_calYear} 年 ${monthNames[_calMonth - 1]}</span>
-        <button class="secondary" id="calNext" style="padding:4px 12px">下月 ›</button>
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <label style="font-size:14px;font-weight:600;color:#1f2937;display:flex;align-items:center;gap:4px">
+          📅
+          <select id="calYearSel" style="padding:4px 8px;border-radius:6px;border:1px solid #d2d2d7;font-size:14px">
+            ${yearOptions.map(y => `<option value="${y}" ${y === _calYear ? 'selected' : ''}>${y} 年</option>`).join('')}
+          </select>
+        </label>
+        <select id="calMonthSel" style="padding:4px 8px;border-radius:6px;border:1px solid #d2d2d7;font-size:14px">
+          ${monthOptions.map(m => `<option value="${m.value}" ${m.value === _calMonth ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+        <button class="secondary" id="calToday" style="padding:4px 12px;font-size:13px">今天</button>
       </div>
       <div style="display:flex;gap:4px;margin-bottom:4px">
         ${weekDays.map(d => `<div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:#6b7280;padding:4px 0;background:#f9fafb;border-radius:4px">${d}</div>`).join('')}
@@ -634,14 +646,20 @@ async function renderCalendar(app) {
     </div>
   `;
 
-  document.getElementById('calPrev').onclick = () => {
-    _calMonth--;
-    if (_calMonth < 1) { _calMonth = 12; _calYear--; }
+  const yearSel = document.getElementById('calYearSel');
+  const monthSel = document.getElementById('calMonthSel');
+  yearSel.onchange = () => {
+    _calYear = parseInt(yearSel.value, 10);
     renderCalendar(app);
   };
-  document.getElementById('calNext').onclick = () => {
-    _calMonth++;
-    if (_calMonth > 12) { _calMonth = 1; _calYear++; }
+  monthSel.onchange = () => {
+    _calMonth = parseInt(monthSel.value, 10);
+    renderCalendar(app);
+  };
+  document.getElementById('calToday').onclick = () => {
+    const n = new Date();
+    _calYear = n.getFullYear();
+    _calMonth = n.getMonth() + 1;
     renderCalendar(app);
   };
 
