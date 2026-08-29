@@ -1260,6 +1260,9 @@ function setForumView(mode) {
   }
   view.innerHTML = html;
 }
+// 暴露到 window，让内联 onclick 能找到（ES Module 顶层 function 不自动挂 window）
+window.getForumViewMode = getForumViewMode;
+window.setForumView = setForumView;
 // 缓存最近一次帖子列表，供视图切换使用
 let _lastForumPostsCache = [];
 
