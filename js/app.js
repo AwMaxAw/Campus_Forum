@@ -136,6 +136,20 @@ function toLightBg(hex) {
 }
 
 // ==================== 顶栏 ====================
+// 根据 UID 推断所在区域（与运维管理员面板的分组规则一致）：
+// 2611 → 广五本部初中部，2612 → 广五本部高中部，2621 → 金碧校区初中部，2622 → 金碧校区高中部
+// 261/262 但学段位非 1/2 → 仅校区；其他 → 其他
+function uidToRegion(uid) {
+  const s = String(uid || '');
+  if (/^2611/.test(s)) return '广五本部初中部';
+  if (/^2612/.test(s)) return '广五本部高中部';
+  if (/^2621/.test(s)) return '金碧校区初中部';
+  if (/^2622/.test(s)) return '金碧校区高中部';
+  if (/^261/.test(s))  return '广五本部';
+  if (/^262/.test(s))  return '金碧校区';
+  return '其他';
+}
+
 async function renderTopBar() {
   const loggedIn = api.isLoggedIn();
   const me = loggedIn ? api.getCurrentUser() : null;
@@ -154,9 +168,11 @@ async function renderTopBar() {
     const roleBadge = me.role === 'ops_admin'
       ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
       : '';
+    const region = uidToRegion(me.uid);
     nav.innerHTML = `
       <span class="nav-right-group">
         <span class="nav-user" title="我的主页" onclick="location.hash='me'">
+          <span class="nav-region" title="所在区域（依据 UID 推断）">${escapeHtml(region)}</span>
           <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
           <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
         </span>
