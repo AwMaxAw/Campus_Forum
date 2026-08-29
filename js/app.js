@@ -541,7 +541,8 @@ function renderCover(app) {
       <p style="font-size:15px;color:#6e6e73;margin-bottom:24px">属于广五人的交流空间</p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         ${loggedIn
-          ? `<button onclick="location.hash='forum'" style="padding:10px 28px;font-size:15px">进入广场 →</button>`
+          ? `<button onclick="location.hash='forum'" style="padding:10px 28px;font-size:15px">进入广场 →</button>
+             <button class="secondary" onclick="location.hash='exp'" style="padding:10px 28px;font-size:15px">📅 每日签到</button>`
           : `<button onclick="location.hash='login'" style="padding:10px 28px;font-size:15px">登录</button>
              <button class="secondary" onclick="location.hash='register'" style="padding:10px 28px;font-size:15px">注册</button>`
         }
@@ -1961,30 +1962,40 @@ function refreshMyProfileDisplay() {
   if (typeof renderTopBar === 'function') renderTopBar();
 }
 
-// ==================== 视图：积分等级页（进度条 + 行为积分规则 + 等级表）====================
+// ==================== 视图：积分等级页（签到板块 + 日历 + 进度条 + 规则 + 等级表）====================
 async function renderExp(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
 
   app.innerHTML = `<div class="empty">🔄 正在读取积分...</div>`;
 
-  // 拉最新积分：发帖/评论/被赞后积分会变，本地缓存可能过期，强制刷新
+  // 并行拉：最新积分 + 签到日历
+  const now = new Date();
+  const cYear = now.getUTCFullYear();
+  const cMonth = now.getUTCMonth() + 1;
+  _checkinYear = cYear; _checkinMonth = cMonth; // 初始化日历月份
   let expPoints = 0;
+  let calData = { year: cYear, month: cMonth, checkedDates: [], streak: 0, todayChecked: false };
+
   try {
-    const r = await api.auth.me();
-    if (r && r.success && r.data) expPoints = Number(r.data.expPoints || 0);
+    const [meRes, calRes] = await Promise.all([
+      api.auth.me().catch(() => null),
+      api.checkin.calendar(cYear, cMonth).catch(() => null),
+    ]);
+    if (meRes && meRes.success && meRes.data) expPoints = Number(meRes.data.expPoints || 0);
+    if (calRes && calRes.success && calRes.data) calData = calRes.data;
   } catch {}
 
   const info = api.getLevelInfo(expPoints);
   const pct = Math.round(info.progress * 100);
 
-  // 取 Lv.N 起点所需积分（表内查表，超出表按 LEVEL_STEP_BEYOND 递推）
+  // 取 Lv.N 起点所需积分
   const levelStart = (lv) => {
     if (lv <= api.LEVEL_THRESHOLDS.length) return api.LEVEL_THRESHOLDS[lv - 1];
     const last = api.LEVEL_THRESHOLDS[api.LEVEL_THRESHOLDS.length - 1];
     return last + api.LEVEL_STEP_BEYOND * (lv - api.LEVEL_THRESHOLDS.length);
   };
 
-  // 等级表前 15 行，标注当前等级
+  // 等级表前 15 行
   const levelRows = [];
   for (let lv = 1; lv <= 15; lv++) {
     const base = levelStart(lv);
@@ -2002,9 +2013,55 @@ async function renderExp(app) {
     ['❤️ 帖子被点赞', `+${api.EXP.LIKED} 积分（加给帖作者，自己赞自己不加分）`],
     ['↩️ 评论被回复', `+${api.EXP.REPLIED} 积分（加给被回复者）`],
     ['👀 浏览帖子', `+${api.EXP.BROWSE} 积分/帖，每日上限 ${api.EXP.BROWSE_DAILY_LIMIT} 积分`],
+    ['📅 每日签到', `+${api.EXP.CHECKIN_BASE} 积分/天，每连续 ${api.EXP.CHECKIN_STREAK_DAYS} 天额外 +${api.EXP.CHECKIN_STREAK_BONUS} 积分`],
   ];
 
+  // ===== 签到板块 + 日历 =====
+  const todayStr = now.toISOString().slice(0, 10);
+  const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+  // 当月第一天是周几（0=周日）
+  const firstDay = new Date(calData.year, calData.month - 1, 1);
+  const firstWeekday = firstDay.getUTCDay();
+  // 当月天数
+  const daysInMonth = new Date(calData.year, calData.month, 0).getUTCDate();
+  // 已签到日期集合（YYYY-MM-DD）
+  const checkedSet = new Set((calData.checkedDates || []).map(d => d.date));
+  // 日历格子
+  const calCells = [];
+  for (let i = 0; i < firstWeekday; i++) calCells.push(`<span class="cal-empty"></span>`);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${calData.year}-${String(calData.month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isChecked = checkedSet.has(dateStr);
+    const isToday = dateStr === todayStr;
+    calCells.push(`<span class="cal-day${isChecked ? ' cal-checked' : ''}${isToday ? ' cal-today' : ''}"${isChecked ? ' title=✅已签' : ''}>${d}${isChecked ? '✅' : ''}</span>`);
+  }
+
+  // 签到按钮状态
+  const checkinBtnHtml = calData.todayChecked
+    ? `<button disabled style="opacity:.5;cursor:not-allowed">✅ 今日已签到</button>`
+    : `<button id="doCheckinBtn" onclick="doCheckinAction()">📅 立即签到 (+${api.EXP.CHECKIN_BASE} 积分)</button>`;
+
   app.innerHTML = `
+    <!-- 签到板块（最顶端）-->
+    <div class="card checkin-card">
+      <div class="checkin-header">
+        <div class="checkin-today">
+          <div class="checkin-date">📅 ${todayStr}</div>
+          <div class="checkin-streak">🔥 连续签到 <b>${calData.streak || 0}</b> 天</div>
+        </div>
+        <div class="checkin-btn-wrap">${checkinBtnHtml}</div>
+      </div>
+      <div class="checkin-calendar" id="checkinCal">
+        <div class="cal-nav">
+          <button class="ghost" onclick="shiftCheckinMonth(-1)">‹</button>
+          <span class="cal-title">${calData.year} 年 ${calData.month} 月</span>
+          <button class="ghost" onclick="shiftCheckinMonth(1)">›</button>
+        </div>
+        <div class="cal-weekdays">${weekdayNames.map(w => `<span>${w}</span>`).join('')}</div>
+        <div class="cal-grid">${calCells.join('')}</div>
+      </div>
+    </div>
+
     <div class="card exp-hero">
       <div class="exp-level-row">
         <div class="exp-level-badge">Lv.${info.level}</div>
@@ -2045,7 +2102,73 @@ async function renderExp(app) {
   `;
 }
 
-// ==================== 视图：系统消息页（notifications 列表 + 全部已读）====================
+// ==================== 签到动作（积分页内按钮 + 日历切换）====================
+// 当前查看的签到日历年月（模块级，跨 renderExp 保持）
+let _checkinYear = 0;
+let _checkinMonth = 0;
+
+window.doCheckinAction = async function () {
+  const btn = document.getElementById('doCheckinBtn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true; btn.textContent = '签到中...';
+  let r;
+  try { r = await api.checkin.do(); } catch (e) { btn.disabled = false; btn.textContent = '签到失败，重试'; return; }
+  if (!r || !r.success) {
+    btn.disabled = false; btn.textContent = r && r.message ? r.message : '签到失败，重试';
+    return;
+  }
+  const d = r.data;
+  const bonusText = d.isBonusDay ? `（🎁 连续 ${d.streak} 天额外奖励 +${api.EXP.CHECKIN_STREAK_BONUS}）` : '';
+  alert(`✅ 签到成功！获得 ${d.gained} 积分${bonusText}，连续签到 ${d.streak} 天。`);
+  refreshNotificationBadge();
+  location.hash = 'exp'; // 重新渲染积分页刷新日历+积分
+};
+
+window.shiftCheckinMonth = async function (delta) {
+  const now = new Date();
+  let y = _checkinYear || now.getUTCFullYear();
+  let m = _checkinMonth || now.getUTCMonth() + 1;
+  m += delta;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  _checkinYear = y; _checkinMonth = m;
+  await renderCheckinCalendarOnly(y, m);
+};
+
+// 仅刷新签到日历（不重渲整个积分页）
+async function renderCheckinCalendarOnly(year, month) {
+  const calBox = document.getElementById('checkinCal');
+  if (!calBox) return;
+  try {
+    const r = await api.checkin.calendar(year, month);
+    if (!r || !r.success) return;
+    const d = r.data;
+    const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
+    const firstDay = new Date(d.year, d.month - 1, 1);
+    const firstWeekday = firstDay.getUTCDay();
+    const daysInMonth = new Date(d.year, d.month, 0).getUTCDate();
+    const checkedSet = new Set((d.checkedDates || []).map(x => x.date));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const cells = [];
+    for (let i = 0; i < firstWeekday; i++) cells.push(`<span class="cal-empty"></span>`);
+    for (let dd = 1; dd <= daysInMonth; dd++) {
+      const ds = `${d.year}-${String(d.month).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      const isChk = checkedSet.has(ds);
+      const isTd = ds === todayStr;
+      cells.push(`<span class="cal-day${isChk ? ' cal-checked' : ''}${isTd ? ' cal-today' : ''}">${dd}${isChk ? '✅' : ''}</span>`);
+    }
+    calBox.innerHTML = `
+      <div class="cal-nav">
+        <button class="ghost" onclick="shiftCheckinMonth(-1)">‹</button>
+        <span class="cal-title">${d.year} 年 ${d.month} 月</span>
+        <button class="ghost" onclick="shiftCheckinMonth(1)">›</button>
+      </div>
+      <div class="cal-weekdays">${weekdayNames.map(w => `<span>${w}</span>`).join('')}</div>
+      <div class="cal-grid">${cells.join('')}</div>
+    `;
+  } catch {}
+}
+
 async function renderNotifications(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   const host = app;
@@ -3167,8 +3290,8 @@ window.doRegister = async function doRegister() {
     const lr = await api.auth.login(uid, pwd);
     if (lr.success) {
       await renderTopBar();
-      alert('注册成功！已自动登录');
-      location.hash = 'forum';
+      location.hash = 'about';
+      alert('🎉 注册成功！已自动登录\n\n请先阅读「关于本站」内容，了解论坛规则后再进入论坛。');
     } else {
       alert('注册成功，请手动登录：' + (lr.message || ''));
       location.hash = 'login';

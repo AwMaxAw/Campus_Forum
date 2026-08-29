@@ -30,6 +30,9 @@ export const EXP = {
   REPLIED: 1,             // 评论被他人回复（加给被回复评论的作者）
   BROWSE: 1,              // 浏览帖子
   BROWSE_DAILY_LIMIT: 10, // 每日浏览积分上限（防刷）
+  CHECKIN_BASE: 3,        // 签到基础积分
+  CHECKIN_STREAK_BONUS: 2, // 连续签到额外奖励（每连续 N 天额外加这个数）
+  CHECKIN_STREAK_DAYS: 7,  // 每连续签到 7 天触发一次额外奖励
 };
 
 /**

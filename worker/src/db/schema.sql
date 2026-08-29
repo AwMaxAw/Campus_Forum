@@ -132,6 +132,18 @@ CREATE TABLE IF NOT EXISTS feedbacks (
   FOREIGN KEY (author_uid) REFERENCES users(uid)
 );
 
+-- 签到记录表（每日签到 + 连续签到日历）
+CREATE TABLE IF NOT EXISTS check_ins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL,
+  check_date TEXT NOT NULL,              -- YYYY-MM-DD (UTC)
+  exp_delta INTEGER NOT NULL DEFAULT 3,   -- 本次签到获得的积分
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(uid, check_date),
+  FOREIGN KEY (uid) REFERENCES users(uid)
+);
+CREATE INDEX IF NOT EXISTS idx_check_ins_uid_date ON check_ins(uid, check_date DESC);
+
 -- 系统通知表（积分变动等系统消息，导航栏铃铛入口）
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

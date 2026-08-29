@@ -49,6 +49,9 @@ export const EXP = {
   REPLIED: 1,             // 评论被他人回复（给被回复者）
   BROWSE: 1,              // 浏览帖子
   BROWSE_DAILY_LIMIT: 10, // 每日浏览积分上限
+  CHECKIN_BASE: 3,        // 签到基础积分
+  CHECKIN_STREAK_BONUS: 2, // 每连续 7 天额外奖励
+  CHECKIN_STREAK_DAYS: 7,  // 连续签到 N 天触发额外奖励
 };
 
 /**
@@ -326,6 +329,20 @@ export const notifications = {
   async markRead(id) {
     if (!tokenCache) return { success: false, message: '请先登录' };
     return request(`/api/notifications/read/${encodeURIComponent(id)}`, { method: 'POST' });
+  },
+};
+
+// ======================== 每日签到 ========================
+export const checkin = {
+  /** 执行签到。返回 { data: { date, gained, streak, isBonusDay } } */
+  async do() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/checkin', { method: 'POST' });
+  },
+  /** 获取某月签到记录。返回 { data: { year, month, checkedDates, streak, todayChecked } } */
+  async calendar(year, month) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/checkin/calendar?year=${year}&month=${month}`);
   },
 };
 

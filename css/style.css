@@ -606,3 +606,58 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 }
 .profile-edit-avatar-actions label.secondary:hover { background: #dcdce0; }
 .field-label { display: block; font-size: 13px; color: #1d1d1f; margin: 8px 0 4px; font-weight: 500; }
+
+/* ==================== 签到板块 + 日历 ==================== */
+.checkin-card { background: linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%); border: 1px solid #fed7aa; }
+.checkin-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.checkin-today .checkin-date { font-size: 16px; font-weight: 600; color: #c2410c; }
+.checkin-today .checkin-streak { font-size: 14px; color: #9a3412; margin-top: 4px; }
+.checkin-today .checkin-streak b { color: #ea580c; font-size: 18px; }
+.checkin-btn-wrap button {
+  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+  color: #fff; border: none; padding: 10px 24px;
+  border-radius: 10px; font-size: 15px; font-weight: 600;
+  cursor: pointer; box-shadow: 0 2px 8px rgba(234,88,12,0.3);
+  transition: transform .15s, box-shadow .15s;
+}
+.checkin-btn-wrap button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(234,88,12,0.4); }
+.checkin-btn-wrap button:disabled { background: #d4d4d8; box-shadow: none; }
+
+/* 日历容器 */
+.checkin-calendar { background: #fff; border-radius: 12px; padding: 14px; border: 1px solid #fed7aa; }
+.checkin-cal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px;
+}
+.checkin-cal-title { font-size: 15px; font-weight: 600; color: #1d1d1f; }
+.checkin-cal-nav button {
+  background: #f3f4f6; border: none; padding: 4px 10px; border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: #374151; margin-left: 6px;
+}
+.checkin-cal-nav button:hover { background: #e5e7eb; }
+
+/* 日历网格 */
+.checkin-cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+}
+.checkin-cal-weekday {
+  text-align: center; font-size: 12px; color: #9ca3af; padding: 4px 0; font-weight: 500;
+}
+.checkin-cal-day {
+  aspect-ratio: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-size: 13px; border-radius: 8px;
+  background: #f9fafb; color: #6b7280;
+  position: relative;
+}
+.checkin-cal-day.empty { background: transparent; }
+.checkin-cal-day.checked {
+  background: linear-gradient(135deg, #f97316 0%, #fb923c 100%);
+  color: #fff; font-weight: 600;
+}
+.checkin-cal-day.today {
+  border: 2px solid #ea580c; font-weight: 700;
+}
+.checkin-cal-day.checked.today {
+  border: 2px solid #fff; box-shadow: 0 0 0 2px #ea580c;
+}
