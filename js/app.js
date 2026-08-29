@@ -1156,16 +1156,13 @@ async function renderForum(app) {
     let html = '';
 
     if (viewMode === 'cards') {
-      // 瀑布流模式（默认）
-      listEl.className = 'waterfall-wrap';
-      if (pinnedPosts.length > 0) {
-        html += `<div class="pinned-banner" style="margin-bottom:8px">📌 置顶帖 ${pinnedPosts.length} 条</div>`;
-        html += `<div class="waterfall-col">${pinnedPosts.map(p => postCardCompact(p)).join('')}</div>`;
-      }
-      html += `<div class="waterfall-col">${normalPosts.map(p => postCardCompact(p)).join('')}</div>`;
+      // 九宫格卡片模式（默认）：置顶直接混排在最前，不单独起行
+      listEl.className = 'cards-grid';
+      const all = [...pinnedPosts, ...normalPosts]; // 置顶 → 普通，按时间顺序
+      html = all.map(p => postCardCompact(p)).join('');
     } else {
-      // 列表视图
-      listEl.className = 'card';
+      // 列表视图（外层已有 card 包裹，这里不要加 card class）
+      listEl.className = '';
       if (pinnedPosts.length > 0) {
         html += `<div id="pinnedSection" style="margin-bottom:12px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
@@ -1238,18 +1235,15 @@ function setForumView(mode) {
 
   let html = '';
   if (mode === 'cards') {
-    // 瀑布流模式：外层 #postList 变 columns 容器
-    if (pinnedPosts.length > 0) {
-      html += `<div class="pinned-banner" style="margin-bottom:8px">📌 置顶帖 ${pinnedPosts.length} 条</div>`;
-      html += `<div class="waterfall-col">${pinnedPosts.map(p => postCardCompact(p)).join('')}</div>`;
-    }
-    html += `<div class="waterfall-col">${normalPosts.map(p => postCardCompact(p)).join('')}</div>`;
-    view.className = 'waterfall-wrap';
+    // 九宫格卡片模式：置顶直接混排最前
+    view.className = 'cards-grid';
+    const all = [...pinnedPosts, ...normalPosts];
+    html = all.map(p => postCardCompact(p)).join('');
   } else {
-    // 列表视图
-    view.className = 'card';
-    const pinnedHtml = pinnedPosts.length > 0
-      ? `<div id="pinnedSection" style="margin-bottom:12px">
+    // 列表视图（外层已有 card 包裹，不要加 card class）
+    view.className = '';
+    if (pinnedPosts.length > 0) {
+      html += `<div id="pinnedSection" style="margin-bottom:12px">
            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
              <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
              <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
@@ -1261,9 +1255,9 @@ function setForumView(mode) {
            <div id="pinnedCollapsed">
              ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
            </div>
-         </div>`
-      : '';
-    html = pinnedHtml + normalPosts.map(p => postCard(p, { allowClick: true })).join('');
+         </div>`;
+    }
+    html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
     window._pinnedData = pinnedPosts.slice();
     bindPinnedEvents();
   }

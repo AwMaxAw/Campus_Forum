@@ -686,16 +686,15 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 }
 .forum-view-icon { font-size: 16px; line-height: 1; }
 
-/* ==================== 卡片瀑布流 ==================== */
-.waterfall-wrap {
-  column-count: 3; column-gap: 12px;
+/* ==================== 卡片九宫格 ==================== */
+.cards-grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(3, 1fr);
 }
-@media (max-width: 1200px) { .waterfall-wrap { column-count: 2; } }
-@media (max-width: 800px)  { .waterfall-wrap { column-count: 1; } }
+@media (max-width: 1200px) { .cards-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 800px)  { .cards-grid { grid-template-columns: 1fr; } }
 
-.waterfall-col { break-inside: avoid; } /* 让 waterfall-col 整体作为一个列避免被切开（但我们用的是全局 column-count，这个 div 只是分组） */
-/* 实际每个卡片要避免被切到两列 */
-.wfall-card { break-inside: avoid; margin-bottom: 12px; }
+.wfall-card { margin-bottom: 0; } /* grid 已通过 gap 控制间距 */
 
 .wfall-card {
   background: #fff; border-radius: 12px; overflow: hidden;
