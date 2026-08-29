@@ -40,7 +40,12 @@ export const EXP = {
  * @param {number} expRaw
  * @returns {{level:number,currentBase:number,nextBase:number,exp:number,progress:number,toNext:number}}
  */
-export function getLevelInfo(expRaw) {
+export function getLevelInfo(expRaw, role) {
+  // 运维管理员 → 永远 Lv.999
+  if (role === 'ops_admin') {
+    const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
+    return { level: 999, currentBase: 0, nextBase: 0, exp, progress: 1, toNext: 0, isAdmin: true };
+  }
   const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
   const lastIdx = LEVEL_THRESHOLDS.length - 1;
   const lastThreshold = LEVEL_THRESHOLDS[lastIdx];

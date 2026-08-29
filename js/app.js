@@ -211,7 +211,7 @@ async function renderTopBar() {
       ${REGIONS.map(r => `<option value="${r.prefix}"${selectedValue === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
     </select>${otherBadge}`;
     // 等级徽标：依据累计积分算等级，点击进积分页（expPoints 可能旧缓存为空，兜底 0）
-    const _li = api.getLevelInfo(Number(me.expPoints || 0));
+    const _li = api.getLevelInfo(Number(me.expPoints || 0), me.role);
     const levelBadge = `<a href="#exp" class="nav-level" onclick="event.stopPropagation()" title="等级 Lv.${_li.level}｜累计积分 ${_li.exp}（点开看详情）">Lv.${_li.level}</a>`;
     // 系统消息铃铛：未读时显示红点数字
     const notifBadge = unreadNotif > 0 ? `<span class="unread-badge">${unreadNotif}</span>` : '';
@@ -1974,6 +1974,7 @@ async function renderExp(app) {
   const cMonth = now.getUTCMonth() + 1;
   _checkinYear = cYear; _checkinMonth = cMonth; // 初始化日历月份
   let expPoints = 0;
+  let myRole = '';
   let calData = { year: cYear, month: cMonth, checkedDates: [], streak: 0, todayChecked: false };
 
   try {
@@ -1981,11 +1982,14 @@ async function renderExp(app) {
       api.auth.me().catch(() => null),
       api.checkin.calendar(cYear, cMonth).catch(() => null),
     ]);
-    if (meRes && meRes.success && meRes.data) expPoints = Number(meRes.data.expPoints || 0);
+    if (meRes && meRes.success && meRes.data) {
+      expPoints = Number(meRes.data.expPoints || 0);
+      myRole = meRes.data.role || '';
+    }
     if (calRes && calRes.success && calRes.data) calData = calRes.data;
   } catch {}
 
-  const info = api.getLevelInfo(expPoints);
+  const info = api.getLevelInfo(expPoints, myRole);
   const pct = Math.round(info.progress * 100);
 
   // 取 Lv.N 起点所需积分
@@ -2982,7 +2986,7 @@ async function renderAdminUsers(host) {
           <div style="overflow-x:auto">
             <table class="admin-table">
               <thead><tr>
-                <th>UID</th><th>昵称</th><th>角色</th><th>帖子数</th>
+                <th>UID</th><th>昵称</th><th>角色</th><th>等级</th><th>积分</th><th>帖子数</th>
                 <th>注册时间</th><th>最后登录</th><th>状态</th><th>操作</th>
               </tr></thead>
               <tbody>
@@ -3050,9 +3054,11 @@ async function renderAdminUsers(host) {
         const uid = btn.dataset.uid;
         const nick = btn.dataset.nick;
         const posts = btn.dataset.posts;
-        if (act === 'ban')    confirmBan(uid, nick);
-        if (act === 'unban')  confirmUnban(uid, nick);
-        if (act === 'delete') confirmDelete(uid, nick, posts);
+        const exp  = btn.dataset.exp;
+        if (act === 'ban')        confirmBan(uid, nick);
+        if (act === 'unban')      confirmUnban(uid, nick);
+        if (act === 'delete')     confirmDelete(uid, nick, posts);
+        if (act === 'adjust-exp') showAdjustExpModal(uid, nick, Number(exp || 0));
       });
     });
   } catch (e) {
@@ -3086,15 +3092,24 @@ function buildUserRow(u, myUid, myRole) {
   const roleText = isOpsAdmin ? '运维管理员' : '普通成员';
   const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
 
+  // 等级 & 积分（ops_admin → Lv.999）
+  const levelInfo = api.getLevelInfo(Number(u.expPoints || 0), u.role);
+  const levelBadge = isOpsAdmin
+    ? `<span style="color:#dc2626;font-weight:700">Lv.999</span>`
+    : `Lv.${levelInfo.level}`;
+  const expBtn = `<button class="btn-mini" style="background:#3b82f6;color:#fff" data-act="adjust-exp" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-exp="${Number(u.expPoints || 0)}">调整积分</button>`;
+
   return `<tr>
     <td><a href="#user/${escapeHtml(u.uid)}" style="color:#2563eb;text-decoration:none">${escapeHtml(u.uid)}</a></td>
     <td><a href="#user/${escapeHtml(u.uid)}" style="color:inherit;text-decoration:none">${escapeHtml(u.nickname)}</a>${selfTag}</td>
     <td>${roleText}</td>
+    <td>${levelBadge}</td>
+    <td>${Number(u.expPoints || 0)}</td>
     <td>${u.postCount || 0}</td>
     <td>${escapeHtml(formatTime(u.createdAt))}</td>
     <td>${lastLogin}</td>
     <td>${statusBadge}</td>
-    <td class="action-cell">${banBtn}${delBtn}</td>
+    <td class="action-cell">${expBtn}${banBtn}${delBtn}</td>
   </tr>`;
 }
 
@@ -3227,6 +3242,71 @@ async function confirmDelete(uid, nick, posts) {
   } else {
     alert(`注销失败：${r.message || '未知错误'}`);
   }
+}
+
+// ==================== 管理员调整用户积分弹窗 ====================
+function showAdjustExpModal(uid, nick, currentExp) {
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.style.zIndex = '120';
+  mask.innerHTML = `
+    <div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <span class="modal-title">⚙️ 调整积分</span>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom:8px;font-size:14px">UID: <b>${escapeHtml(uid)}</b></div>
+        <div style="margin-bottom:12px;font-size:14px">昵称: <b>${escapeHtml(nick || '—')}</b></div>
+        <div style="margin-bottom:4px;font-size:13px;color:#6b7280">当前积分</div>
+        <div style="font-size:22px;font-weight:700;color:#2563eb;margin-bottom:12px">${currentExp}</div>
+        <div style="margin-bottom:4px;font-size:13px;color:#6b7280">设置为（非负整数）</div>
+        <input id="adjustExpInput" type="number" min="0" step="1" value="${currentExp}"
+               style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:15px" />
+        <div style="margin-top:8px;display:flex;gap:6px">
+          <button id="expQuickMinus50" class="ghost" style="padding:4px 10px;font-size:12px">-50</button>
+          <button id="expQuickMinus10" class="ghost" style="padding:4px 10px;font-size:12px">-10</button>
+          <button id="expQuickPlus10"  class="ghost" style="padding:4px 10px;font-size:12px">+10</button>
+          <button id="expQuickPlus50"  class="ghost" style="padding:4px 10px;font-size:12px">+50</button>
+          <button id="expQuickSet0"    class="ghost" style="padding:4px 10px;font-size:12px">清零</button>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:flex-end;gap:8px">
+        <button class="ghost" id="adjustExpCancelBtn">取消</button>
+        <button class="secondary" id="adjustExpOkBtn">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(mask);
+
+  const input = mask.querySelector('#adjustExpInput');
+  const close = () => mask.remove();
+  mask.querySelector('#adjustExpCancelBtn').onclick = close;
+  mask.onclick = (e) => { if (e.target === mask) close(); };
+
+  // 快捷调整按钮
+  const delta = (d) => { input.value = Math.max(0, (parseInt(input.value, 10) || 0) + d); };
+  mask.querySelector('#expQuickMinus50').onclick = () => delta(-50);
+  mask.querySelector('#expQuickMinus10').onclick = () => delta(-10);
+  mask.querySelector('#expQuickPlus10').onclick  = () => delta(+10);
+  mask.querySelector('#expQuickPlus50').onclick  = () => delta(+50);
+  mask.querySelector('#expQuickSet0').onclick    = () => { input.value = 0; };
+
+  mask.querySelector('#adjustExpOkBtn').onclick = async () => {
+    const v = parseInt(input.value, 10);
+    if (!Number.isFinite(v) || v < 0) { alert('请输入有效的非负整数'); return; }
+    const okBtn = mask.querySelector('#adjustExpOkBtn');
+    okBtn.disabled = true; okBtn.textContent = '保存中...';
+    const r = await api.admin.adjustExp(uid, v);
+    if (r.success) {
+      alert(`✅ 调整成功：${nick || uid} 的积分 ${currentExp} → ${r.data.newExp}`);
+      close();
+      await renderAdminUsers(document.getElementById('adminUsers'));
+    } else {
+      alert(`❌ 调整失败：${r.message || '未知错误'}`);
+      okBtn.disabled = false; okBtn.textContent = '保存';
+    }
+  };
+  setTimeout(() => input.focus(), 50);
 }
 
 // ==================== 登录后：未读公告逐条弹窗 ====================
