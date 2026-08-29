@@ -841,16 +841,15 @@ async function renderForum(app) {
   app.innerHTML = `
     ${topBanner}
     <div class="forum-layout">
-      <!-- 左侧主区：分区Tab + 帖子列表 -->
+      <!-- 左侧主区：帖子列表 -->
       <div class="forum-main">
-        ${tabBarHtml}
         <div class="card">
           <h3 id="listTitle" style="margin-top:0;margin-bottom:10px">最新帖子</h3>
           <div id="postList" class="empty">🔄 正在读取帖子...</div>
         </div>
       </div>
 
-      <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字） -->
+      <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里） -->
       <aside class="forum-aside card search-panel">
         <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
         <div class="search-row">
@@ -883,6 +882,9 @@ async function renderForum(app) {
           <button class="secondary" onclick="clearHomeFilters()">🗑 清除条件</button>
         </div>
         <div id="filterBadges" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:8px"></div>
+
+        <h4 style="margin:10px 0 6px;font-size:13px;color:#374151">📂 分区</h4>
+        ${tabBarHtml}
         <div id="popularTags">🔄 正在读取热门标签…</div>
 
         <div style="border-top:1px dashed #e5e7eb;margin:12px 0 8px"></div>
