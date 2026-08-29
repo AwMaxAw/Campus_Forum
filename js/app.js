@@ -339,38 +339,63 @@ window.clearHomeFilters = function clearHomeFilters() {
 };
 
 // ==================== 用户搜索功能 ====================
-// 合并搜索：q 可选传入（由 renderForum 末尾按 hash 关键字自动同步）；
-// 不传则读取右侧搜索框 sqInput 的值（与帖子关键字共用同一个输入框）
+// 合并搜索：q 可选传入；不传则读取搜索框 sqInput。
+// 渲染目标：左侧主区的 #userBlock（卡片样式包裹，顶部小标题+结果列表）
+// 返回 { success, count } 便于调用方了解结果情况。
 window.runUserSearch = async function runUserSearch(q) {
   const input = document.getElementById('sqInput');
-  const results = document.getElementById('userSearchResults');
-  if (!results) return;
+  const userBlock = document.getElementById('userBlock');
+  if (!userBlock) return { success: false, count: 0 };
   const kw = (q != null ? String(q) : (input && input.value || '')).trim();
-  if (!kw) { results.innerHTML = ''; return; }
+  if (!kw) { userBlock.innerHTML = ''; return { success: true, count: 0 }; }
 
-  results.innerHTML = '<span class="hint">🔄 搜索中...</span>';
+  userBlock.innerHTML = `
+    <div class="card">
+      <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+      <span class="hint">🔄 搜索中...</span>
+    </div>`;
   try {
     const r = await api.users.search(kw);
-    if (!r.success) { results.innerHTML = `<span class="hint">❌ ${escapeHtml(r.message)}</span>`; return; }
+    if (!r.success) {
+      userBlock.innerHTML = `
+        <div class="card">
+          <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+          <span class="hint">❌ ${escapeHtml(r.message)}</span>
+        </div>`;
+      return { success: false, count: 0 };
+    }
     const list = r.data || [];
     if (list.length === 0) {
-      results.innerHTML = `<span class="hint">未找到匹配的用户</span>`;
-      return;
+      userBlock.innerHTML = `
+        <div class="card">
+          <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+          <span class="hint">未找到匹配的用户</span>
+        </div>`;
+      return { success: true, count: 0 };
     }
-    results.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:6px">找到 ${list.length} 个用户</div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${list.map(u => renderUserSearchItem(u)).join('')}
+    userBlock.innerHTML = `
+      <div class="card">
+        <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户（${list.length}）</h4>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${list.map(u => renderUserSearchItem(u)).join('')}
+        </div>
       </div>`;
+    return { success: true, count: list.length };
   } catch (e) {
-    results.innerHTML = `<span class="hint">❌ 搜索失败：${escapeHtml(e.message)}</span>`;
+    userBlock.innerHTML = `
+      <div class="card">
+        <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+        <span class="hint">❌ 搜索失败：${escapeHtml(e.message)}</span>
+      </div>`;
+    return { success: false, count: 0 };
   }
 };
 
 window.clearUserSearch = function clearUserSearch() {
   const input = document.getElementById('sqInput');
-  const results = document.getElementById('userSearchResults');
+  const userBlock = document.getElementById('userBlock');
   if (input) input.value = '';
-  if (results) results.innerHTML = '';
+  if (userBlock) userBlock.innerHTML = '';
 };
 
 function renderUserSearchItem(u) {
@@ -841,15 +866,19 @@ async function renderForum(app) {
   app.innerHTML = `
     ${topBanner}
     <div class="forum-layout">
-      <!-- 左侧主区：帖子列表 -->
+      <!-- 左侧主区：搜索结果 = 用户块 + 帖子块 -->
       <div class="forum-main">
+        <!-- 用户搜索结果块（有搜索关键字才显示内容） -->
+        <div id="userBlock" style="margin-bottom:12px"></div>
+
+        <!-- 帖子块 -->
         <div class="card">
           <h3 id="listTitle" style="margin-top:0;margin-bottom:10px">最新帖子</h3>
           <div id="postList" class="empty">🔄 正在读取帖子...</div>
         </div>
       </div>
 
-      <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里） -->
+      <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里；不再显示用户匹配结果） -->
       <aside class="forum-aside card search-panel">
         <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
         <div class="search-row">
@@ -886,10 +915,6 @@ async function renderForum(app) {
         <h4 style="margin:10px 0 6px;font-size:13px;color:#374151">📂 分区</h4>
         ${tabBarHtml}
         <div id="popularTags">🔄 正在读取热门标签…</div>
-
-        <div style="border-top:1px dashed #e5e7eb;margin:12px 0 8px"></div>
-        <h4 style="margin:0 0 8px 0;font-size:14px">👤 匹配用户</h4>
-        <div id="userSearchResults"></div>
       </aside>
     </div>
   `;
@@ -908,9 +933,13 @@ async function renderForum(app) {
       ).join('')}</div>`;
   })().catch(() => { /* 热门标签读取失败不用影响主流程 */ });
 
-  // --- 2) 读帖子列表（带筛选） ---
+  // --- 2) 读帖子列表（带筛选）；同时并行按相同关键字搜索用户（结果放左侧 userBlock） ---
   const listEl = document.getElementById('postList');
   const listTitleEl = document.getElementById('listTitle');
+
+  // 合并搜索：若有关键字，立刻启动用户搜索（并行，不阻塞帖子读取）
+  const userSearchPromise = filters.q ? runUserSearch(filters.q) : Promise.resolve({ success: true, count: 0 });
+
   try {
     const postFilters = {
       category: filters.category || undefined,
@@ -930,13 +959,16 @@ async function renderForum(app) {
     const countEl = document.getElementById('postCount');
     if (countEl) countEl.textContent = `共 ${total} 条帖子`;
 
-    // 列表标题：有筛选条件就显示"搜索结果 N 条"
     const applied = (res.appliedFilters || {});
     const hasFilter = applied.category || applied.q || applied.tag || applied.dateFrom || applied.dateTo;
     const catLabelForTitle = applied.category ? (CATEGORY_LABEL[applied.category] || applied.category) : null;
     const prefix = catLabelForTitle ? `「${catLabelForTitle}」` : '';
     const sortTitles = { latest: '最新帖子', likes: '🔥 点赞最多排', comments: '💬 评论最多排', views: '👁 浏览最多排' };
-    if (listTitleEl) listTitleEl.textContent = hasFilter ? `${prefix}${prefix ? ' ' : ''}搜索结果（${total} 条）` : (sortTitles[applied.sortBy] || '最新帖子');
+    if (listTitleEl) {
+      listTitleEl.textContent = hasFilter
+        ? `${prefix}${prefix ? ' ' : ''}📝 匹配帖子（${total} 条）`
+        : (sortTitles[applied.sortBy] || '最新帖子');
+    }
 
     // 条件徽章（category / q / tag / 日期区间，点 × 清掉单个）
     const badgeBox = document.getElementById('filterBadges');
@@ -958,9 +990,9 @@ async function renderForum(app) {
       listEl.outerHTML = `<div class="empty">${hasFilter ? '😶 没有匹配的帖子，试试 🔎 清除条件 重新搜索～' : '还没有帖子，快来发第一条吧'}</div>`;
       return;
     }
-    // 分置顶帖和普通帖
-    const pinnedPosts = data.filter(p => p.isPinned);
-    const normalPosts = data.filter(p => !p.isPinned);
+    // 分置顶帖和普通帖：搜索筛选态不再单独置顶折叠区，按排序直接混排
+    const pinnedPosts = hasFilter ? [] : data.filter(p => p.isPinned);
+    const normalPosts = hasFilter ? data : data.filter(p => !p.isPinned);
 
     let html = '';
     if (pinnedPosts.length > 0) {
@@ -990,8 +1022,8 @@ async function renderForum(app) {
     listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
 
-  // 合并搜索：若有关键字，自动同步搜索用户（右侧板块显示匹配用户）
-  if (filters.q) runUserSearch(filters.q);
+  // 确保用户搜索 Promise 不抛未处理异常（用户搜索渲染自己处理异常）
+  userSearchPromise.catch(() => {});
 }
 window._togglePinned = function _togglePinned() {
   const expanded = document.getElementById('pinnedExpanded');
