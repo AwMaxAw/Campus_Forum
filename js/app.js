@@ -2238,8 +2238,12 @@ async function renderAdminUsers(host) {
     const myRole = me && me.role;
 
     // 按 UID 分组：261* → 广五本部，262* → 金碧校区，其他 → 其他
+    // 第 4 位：1=初中，2=高中
     const isCampusA = u => /^261/.test(String(u.uid));   // 广五本部
     const isCampusB = u => /^262/.test(String(u.uid));   // 金碧校区
+    const isJunior   = u => /^26[12]1/.test(String(u.uid)); // 初中
+    const isSenior   = u => /^26[12]2/.test(String(u.uid)); // 高中
+
     const groupA = users.filter(isCampusA);
     const groupB = users.filter(isCampusB);
     const groupC = users.filter(u => !isCampusA(u) && !isCampusB(u));
@@ -2270,10 +2274,32 @@ async function renderAdminUsers(host) {
       `;
     }
 
+    // 校区分组内部再按初中/高中分组渲染
+    function campusWithSubGroups(campusTitle, campusColor, campusList) {
+      if (campusList.length === 0) return '';
+      const junior = campusList.filter(isJunior);
+      const senior = campusList.filter(isSenior);
+      const other  = campusList.filter(u => !isJunior(u) && !isSenior(u));
+      return `
+        <div style="margin-bottom:22px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="display:inline-block;width:4px;height:20px;background:${campusColor};border-radius:2px"></span>
+            <span style="font-weight:700;font-size:15px">${escapeHtml(campusTitle)}</span>
+            <span style="font-size:12px;color:#6b7280">· ${campusList.length} 个账号</span>
+          </div>
+          <div style="margin-left:12px">
+            ${groupTable('初中部', '26 年学生账号 · 初中', junior, campusColor)}
+            ${groupTable('高中部', '26 年学生账号 · 高中', senior, campusColor)}
+            ${other.length ? groupTable('其他', '非标准格式账号', other, '#6b7280') : ''}
+          </div>
+        </div>
+      `;
+    }
+
     host.innerHTML = `
       <div style="font-size:12px;color:#6b7280;margin-bottom:10px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
-      ${groupTable('广五本部', '26 届学生账号 · 广五本部', groupA, '#1e40af')}
-      ${groupTable('金碧校区', '26 届学生账号 · 金碧校区', groupB, '#059669')}
+      ${campusWithSubGroups('广五本部', '#1e40af', groupA)}
+      ${campusWithSubGroups('金碧校区', '#059669', groupB)}
       ${groupTable('其他', '非 26 开头的账号', groupC, '#6b7280')}
     `;
 
