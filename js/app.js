@@ -250,14 +250,20 @@ function postCard(p, opts = {}) {
     : '';
   const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
   const clickable = opts.allowClick ? 'clickable' : '';
-  const onclickAttr = opts.allowClick ? `onclick="location.hash='#detail/${p.id}'"` : '';
+  // 置顶帖（带 foldId）的卡片 div 不绑 onclick 跳转，避免与"折叠"操作的内联 onclick 时序冲突；
+  // 改由标题 h3 可点击跳转详情。普通帖保持整卡可点。
+  const isPinnedCard = !!opts.foldId;
+  const onclickAttr = (opts.allowClick && !isPinnedCard) ? `onclick="location.hash='#detail/${p.id}'"` : '';
+  const titleClickAttr = isPinnedCard
+    ? `onclick="location.hash='#detail/${p.id}'" style="cursor:pointer;color:#1d4ed8"`
+    : '';
   const pinBadge = p.isPinned
     ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
     : '';
   const catBadge = categoryBadgeHtml(p.category, { clickable: opts.allowClick });
-  // 可选折叠文字（置顶帖展开后右下角，点击折回折叠行）；stopPropagation 避免触发卡片跳详情
+  // 置顶帖右下角折叠文字：父 div 已不绑 onclick，用 data-act 事件委托处理
   const foldBtn = opts.foldId
-    ? `<span onclick="event.stopPropagation();window._foldPinned(${opts.foldId})" style="font-size:12px;color:#6b7280;cursor:pointer">折叠</span>`
+    ? `<span data-act="fold" data-id="${opts.foldId}" style="font-size:12px;color:#6b7280;cursor:pointer">折叠</span>`
     : '';
   return `
     <div class="card ${clickable}" ${onclickAttr} data-post-id="${p.id}">
@@ -266,7 +272,7 @@ function postCard(p, opts = {}) {
         <span>·</span>
         <span>${escapeHtml(time)}</span>
       </div>
-      <h3>${escapeHtml(p.title)}</h3>
+      <h3 ${titleClickAttr}>${escapeHtml(p.title)}</h3>
       <p style="white-space:pre-wrap">${escapeHtml(normalizeNewlines((p.content || '').slice(0, 140)))}${(p.content || '').length > 140 ? '…' : ''}</p>
       ${imagesHtml}
       ${tags}
@@ -281,7 +287,7 @@ function postCard(p, opts = {}) {
 // 置顶帖折叠行 HTML（单行标题形式，点击展开）；抽取出来供初始渲染与折回时复用
 function pinnedRowHtml(p) {
   return `
-    <div class="card clickable" id="pinnedRow-${p.id}" onclick="window._expandPinned(${p.id})" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px" title="点击展开">
+    <div class="card clickable" id="pinnedRow-${p.id}" data-act="expand" data-id="${p.id}" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px" title="点击展开">
       <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
       ${categoryBadgeHtml(p.category)}
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
@@ -1050,10 +1056,10 @@ async function renderForum(app) {
     let html = '';
     if (pinnedPosts.length > 0) {
       html += `<div id="pinnedSection" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" onclick="window._togglePinned()">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
           <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
           <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
-          <span onclick="event.stopPropagation();window._foldAllPinned()" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
+          <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
         </div>
         <div id="pinnedExpanded" style="display:none">
           ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
@@ -1067,12 +1073,30 @@ async function renderForum(app) {
     window._pinnedData = pinnedPosts.slice();
     html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
     listEl.outerHTML = html;
+    bindPinnedEvents();
   } catch (e) {
     listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
 
   // 确保用户搜索 Promise 不抛未处理异常（用户搜索渲染自己处理异常）
   userSearchPromise.catch(() => {});
+}
+// 置顶帖交互事件委托：在 #pinnedSection 上统一监听 click，按 data-act 派发。
+// 这样 outerHTML 替换出的新元素（折叠行/完整卡片）也能自动响应，避免内联 onclick 在事件处理中替换 DOM 的时序问题（导致要点两次）。
+function bindPinnedEvents() {
+  const ps = document.getElementById('pinnedSection');
+  if (!ps || ps._bound) return;
+  ps._bound = true;
+  ps.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-act]');
+    if (!el || el.closest('#pinnedSection') !== ps) return;
+    const act = el.dataset.act;
+    const id = el.dataset.id != null ? Number(el.dataset.id) : null;
+    if (act === 'toggle')      window._togglePinned();
+    else if (act === 'expand') window._expandPinned(id);
+    else if (act === 'fold')   window._foldPinned(id);
+    else if (act === 'foldAll')window._foldAllPinned();
+  });
 }
 window._togglePinned = function _togglePinned() {
   const expanded = document.getElementById('pinnedExpanded');
