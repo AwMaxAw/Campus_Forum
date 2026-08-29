@@ -149,6 +149,22 @@ function uidToRegion(uid) {
   if (/^262/.test(s))  return '金碧校区';
   return '其他';
 }
+// 4 个标准分区的 UID 前缀；非标准 UID（管理员/其他）返回 null，这类账号可用下拉框切换查看任意分区
+function uidToRegionPrefix(uid) {
+  const s = String(uid || '');
+  if (/^2611/.test(s)) return '2611';
+  if (/^2612/.test(s)) return '2612';
+  if (/^2621/.test(s)) return '2621';
+  if (/^2622/.test(s)) return '2622';
+  return null;
+}
+// 4 个分区列表（供"其他"账号下拉框切换用）
+const REGIONS = [
+  { prefix: '2611', label: '广五本部初中部' },
+  { prefix: '2612', label: '广五本部高中部' },
+  { prefix: '2621', label: '金碧校区初中部' },
+  { prefix: '2622', label: '金碧校区高中部' },
+];
 
 async function renderTopBar() {
   const loggedIn = api.isLoggedIn();
@@ -168,11 +184,22 @@ async function renderTopBar() {
     const roleBadge = me.role === 'ops_admin'
       ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
       : '';
-    const region = uidToRegion(me.uid);
+    // 标准账号（2611/2612/2621/2622）锁定本分区，显示固定徽标；
+    // "其他"账号（管理员/非标准 UID）在头像左侧用下拉框切换查看任意分区
+    const myPrefix = uidToRegionPrefix(me.uid);
+    const regionEl = myPrefix
+      ? `<span class="nav-region" title="所在区域（依据 UID 推断）">${escapeHtml(uidToRegion(me.uid))}</span>`
+      : (() => {
+          const cur = getHomeFilters().region;
+          return `<select class="nav-region-select" onclick="event.stopPropagation()" onchange="setHomeFilter('region', this.value)" title="切换查看分区">
+            <option value=""${cur === '' ? ' selected' : ''}>全部区域</option>
+            ${REGIONS.map(r => `<option value="${r.prefix}"${cur === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
+          </select>`;
+        })();
     nav.innerHTML = `
       <span class="nav-right-group">
         <span class="nav-user" title="我的主页" onclick="location.hash='me'">
-          <span class="nav-region" title="所在区域（依据 UID 推断）">${escapeHtml(region)}</span>
+          ${regionEl}
           <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
           <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
         </span>
@@ -326,6 +353,7 @@ function getHomeFilters() {
     dateFrom: qp.get('from') || '',
     dateTo: qp.get('to') || '',
     sortBy: qp.get('sort') || 'latest',
+    region: qp.get('region') || '',   // 分区前缀 2611/2612/2621/2622（仅"其他"账号可切换）
     __path: pathPart,
   };
 }
@@ -337,6 +365,7 @@ function buildHomeHash(f) {
   if (f.dateFrom) qp.set('from', f.dateFrom);
   if (f.dateTo) qp.set('to', f.dateTo);
   if (f.sortBy && f.sortBy !== 'latest') qp.set('sort', f.sortBy);
+  if (f.region) qp.set('region', f.region);
   const qs = qp.toString();
   return '#forum' + (qs ? `?${qs}` : '');
 }
@@ -910,6 +939,9 @@ async function renderForum(app) {
   const loggedIn = api.isLoggedIn();
   const me = loggedIn ? api.getCurrentUser() : null;
   const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
+  // 分区：标准账号（2611/2612/2621/2622）锁定看本分区帖子；"其他"账号用顶栏下拉框切换的分区（filters.region）
+  const myRegionPrefix = me ? uidToRegionPrefix(me.uid) : null;
+  const region = myRegionPrefix || filters.region || '';
 
   // 顶部信息条：帖子计数留在左侧主区（发新帖按钮移到右侧搜索面板顶部，与 aside 同宽且一起 sticky 浮动）
   const topBanner = `<div class="toolbar">
@@ -1023,6 +1055,7 @@ async function renderForum(app) {
       dateFrom: filters.dateFrom || undefined,
       dateTo: filters.dateTo || undefined,
       sortBy: filters.sortBy,
+      region: region || undefined,
     };
     const res = await api.posts.list(1, 50, postFilters);
     if (!res.success) {
@@ -1032,7 +1065,11 @@ async function renderForum(app) {
     const data = res.data || [];
     const total = (res.pagination || {}).total || 0;
     const countEl = document.getElementById('postCount');
-    if (countEl) countEl.textContent = `共 ${total} 条帖子`;
+    // 当前分区标签：标准账号显示本分区，其他账号显示下拉框选择的分区（未选则"全部区域"）
+    const regionLabel = region
+      ? (REGIONS.find(r => r.prefix === region) || {}).label || `分区 ${region}`
+      : '全部区域';
+    if (countEl) countEl.textContent = `共 ${total} 条帖子 · 当前：${regionLabel}`;
 
     const applied = (res.appliedFilters || {});
     const hasFilter = applied.category || applied.q || applied.tag || applied.dateFrom || applied.dateTo;

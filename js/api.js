@@ -312,6 +312,7 @@ export const posts = {
     if (f.dateFrom) qs.set('date_from', f.dateFrom); // YYYY-MM-DD
     if (f.dateTo)   qs.set('date_to', f.dateTo);
     if (f.sortBy)   qs.set('sort_by', f.sortBy);     // 'latest' | 'likes' | 'comments' | 'views'
+    if (f.region)   qs.set('region', f.region);     // 区域前缀 2611/2612/2621/2622（分区过滤）
     return request(`/api/posts?${qs}`, { needsAuth: false });
   },
   /** 热门标签榜（首页搜索条 chip 推荐用） */

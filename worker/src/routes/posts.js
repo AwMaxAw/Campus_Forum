@@ -89,6 +89,7 @@ posts.get('/', async (c) => {
     const dateTo = (searchParams.get('date_to') || '').trim();     // YYYY-MM-DD
     const sortBy = searchParams.get('sort_by') || 'latest'; // latest | likes | comments | views
     const author = (searchParams.get('author') || '').trim(); // 按作者 UID 过滤（用户主页用）
+    const region = (searchParams.get('region') || '').trim();   // 区域前缀：2611/2612/2621/2622（按作者 UID 前缀过滤分区）
     const offset = (page - 1) * pageSize;
 
     const db = c.env.DB;
@@ -102,6 +103,11 @@ posts.get('/', async (c) => {
     if (author && /^\d{1,8}$/.test(author)) {
       whereParts.push('p.author_uid = ?');
       params.push(author);
+    }
+    // 分区过滤：按作者 UID 前缀（2611=广五本部初中部 / 2612=广五本部高中部 / 2621=金碧校区初中部 / 2622=金碧校区高中部）
+    if (region && /^26[12][12]$/.test(region)) {
+      whereParts.push("CAST(p.author_uid AS TEXT) LIKE ?");
+      params.push(`${region}%`);
     }
     if (q) {
       whereParts.push('(p.title LIKE ? OR p.content LIKE ?)');
