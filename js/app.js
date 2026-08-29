@@ -255,9 +255,9 @@ function postCard(p, opts = {}) {
     ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
     : '';
   const catBadge = categoryBadgeHtml(p.category, { clickable: opts.allowClick });
-  // 可选折叠按钮（置顶帖展开后右下角，点击折回折叠行）；stopPropagation 避免触发卡片跳详情
+  // 可选折叠文字（置顶帖展开后右下角，点击折回折叠行）；stopPropagation 避免触发卡片跳详情
   const foldBtn = opts.foldId
-    ? `<button onclick="event.stopPropagation();window._foldPinned(${opts.foldId})" style="font-size:12px;padding:2px 10px;border:1px solid #d2d2d7;background:#fff;color:#6b7280;border-radius:6px;cursor:pointer">⌄ 折叠</button>`
+    ? `<span onclick="event.stopPropagation();window._foldPinned(${opts.foldId})" style="font-size:12px;color:#6b7280;cursor:pointer">折叠</span>`
     : '';
   return `
     <div class="card ${clickable}" ${onclickAttr} data-post-id="${p.id}">
@@ -1050,12 +1050,10 @@ async function renderForum(app) {
     let html = '';
     if (pinnedPosts.length > 0) {
       html += `<div id="pinnedSection" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;flex:1" onclick="window._togglePinned()">
-            <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
-            <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
-          </div>
-          <button onclick="window._foldAllPinned()" style="font-size:12px;padding:2px 10px;border:1px solid #d2d2d7;background:#fff;color:#6b7280;border-radius:6px;cursor:pointer">⌄ 全部折叠</button>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" onclick="window._togglePinned()">
+          <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+          <span onclick="event.stopPropagation();window._foldAllPinned()" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
         </div>
         <div id="pinnedExpanded" style="display:none">
           ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
