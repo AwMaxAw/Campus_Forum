@@ -2016,50 +2016,69 @@ async function renderExp(app) {
     ['📅 每日签到', `+${api.EXP.CHECKIN_BASE} 积分/天，每连续 ${api.EXP.CHECKIN_STREAK_DAYS} 天额外 +${api.EXP.CHECKIN_STREAK_BONUS} 积分`],
   ];
 
-  // ===== 签到板块 + 日历 =====
+  // ===== 签到板块（独立卡片）=====
   const todayStr = now.toISOString().slice(0, 10);
-  const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
-  // 当月第一天是周几（0=周日）
-  const firstDay = new Date(calData.year, calData.month - 1, 1);
-  const firstWeekday = firstDay.getUTCDay();
-  // 当月天数
-  const daysInMonth = new Date(calData.year, calData.month, 0).getUTCDate();
-  // 已签到日期集合（YYYY-MM-DD）
-  const checkedSet = new Set((calData.checkedDates || []).map(d => d.date));
-  // 日历格子
-  const calCells = [];
-  for (let i = 0; i < firstWeekday; i++) calCells.push(`<span class="cal-empty"></span>`);
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${calData.year}-${String(calData.month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const isChecked = checkedSet.has(dateStr);
-    const isToday = dateStr === todayStr;
-    calCells.push(`<span class="cal-day${isChecked ? ' cal-checked' : ''}${isToday ? ' cal-today' : ''}"${isChecked ? ' title=✅已签' : ''}>${d}${isChecked ? '✅' : ''}</span>`);
-  }
-
   // 签到按钮状态
   const checkinBtnHtml = calData.todayChecked
     ? `<button disabled style="opacity:.5;cursor:not-allowed">✅ 今日已签到</button>`
     : `<button id="doCheckinBtn" onclick="doCheckinAction()">📅 立即签到 (+${api.EXP.CHECKIN_BASE} 积分)</button>`;
 
+  // ===== 签到日历（独立卡片，周一开头 + 6×7 完整网格）=====
+  const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+  const weekDaysCN = ['周一','周二','周三','周四','周五','周六','周日'];
+  const thisYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 11 }, (_, i) => thisYear - 5 + i);
+
+  // 生成日历网格（42 格 = 6行×7列）
+  const buildCalCells = (year, month, checkedDates) => {
+    const firstDay = new Date(year, month - 1, 1);
+    const startWeekday = (firstDay.getUTCDay() + 6) % 7; // 周一=0
+    const daysInMonth = new Date(year, month, 0).getUTCDate();
+    const checkedSet = new Set((checkedDates || []).map(d => d.date));
+    const tStr = new Date().toISOString().slice(0, 10);
+    const cells = [];
+    for (let i = 0; i < startWeekday; i++) cells.push(`<span class="ckin-cell empty"></span>`);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const isChk = checkedSet.has(ds);
+      const isTd = ds === tStr;
+      cells.push(`<span class="ckin-cell${isChk ? ' checked' : ''}${isTd ? ' today' : ''}">${d}${isChk ? '<em>✓</em>' : ''}</span>`);
+    }
+    // 补齐到 42 格
+    while (cells.length < 42) cells.push(`<span class="ckin-cell empty"></span>`);
+    return cells.join('');
+  };
+  const calCellsHtml = buildCalCells(calData.year, calData.month, calData.checkedDates);
+
   app.innerHTML = `
-    <!-- 签到板块（最顶端）-->
+    <!-- 签到板块（独立卡片）-->
     <div class="card checkin-card">
-      <div class="checkin-header">
-        <div class="checkin-today">
+      <div class="checkin-top">
+        <div class="checkin-info">
           <div class="checkin-date">📅 ${todayStr}</div>
           <div class="checkin-streak">🔥 连续签到 <b>${calData.streak || 0}</b> 天</div>
         </div>
-        <div class="checkin-btn-wrap">${checkinBtnHtml}</div>
+        <div class="checkin-btn">${checkinBtnHtml}</div>
       </div>
-      <div class="checkin-calendar" id="checkinCal">
-        <div class="cal-nav">
-          <button class="ghost" onclick="shiftCheckinMonth(-1)">‹</button>
-          <span class="cal-title">${calData.year} 年 ${calData.month} 月</span>
-          <button class="ghost" onclick="shiftCheckinMonth(1)">›</button>
-        </div>
-        <div class="cal-weekdays">${weekdayNames.map(w => `<span>${w}</span>`).join('')}</div>
-        <div class="cal-grid">${calCells.join('')}</div>
+    </div>
+
+    <!-- 签到日历（独立卡片，缩小版导航栏日历风格）-->
+    <div class="card ckin-cal-card" id="checkinCalWrap">
+      <div class="ckin-cal-toolbar">
+        <label class="ckin-cal-label">📅 签到日历
+          <select id="ckinYearSel">
+            ${yearOptions.map(y => `<option value="${y}" ${y === calData.year ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+          <select id="ckinMonthSel">
+            ${monthNames.map((name, i) => `<option value="${i + 1}" ${i + 1 === calData.month ? 'selected' : ''}>${name}</option>`).join('')}
+          </select>
+        </label>
+        <button class="ghost" id="ckinTodayBtn" style="font-size:13px;padding:2px 10px">今天</button>
       </div>
+      <div class="ckin-cal-weekdays">
+        ${weekDaysCN.map(w => `<span>${w}</span>`).join('')}
+      </div>
+      <div class="ckin-cal-grid" id="ckinGrid">${calCellsHtml}</div>
     </div>
 
     <div class="card exp-hero">
@@ -2100,6 +2119,19 @@ async function renderExp(app) {
       <button class="ghost" onclick="location.hash='me'">返回我的</button>
     </div>
   `;
+
+  // 绑定签到日历下拉框 + 今天按钮
+  const ySel = document.getElementById('ckinYearSel');
+  const mSel = document.getElementById('ckinMonthSel');
+  const todayBtn = document.getElementById('ckinTodayBtn');
+  if (ySel) ySel.onchange = () => { _checkinYear = parseInt(ySel.value, 10); renderCheckinCalendarOnly(_checkinYear, _checkinMonth); };
+  if (mSel) mSel.onchange = () => { _checkinMonth = parseInt(mSel.value, 10); renderCheckinCalendarOnly(_checkinYear, _checkinMonth); };
+  if (todayBtn) todayBtn.onclick = () => {
+    const n = new Date();
+    _checkinYear = n.getUTCFullYear(); _checkinMonth = n.getUTCMonth() + 1;
+    ySel.value = _checkinYear; mSel.value = _checkinMonth;
+    renderCheckinCalendarOnly(_checkinYear, _checkinMonth);
+  };
 }
 
 // ==================== 签到动作（积分页内按钮 + 日历切换）====================
@@ -2132,40 +2164,37 @@ window.shiftCheckinMonth = async function (delta) {
   if (m < 1) { m = 12; y--; }
   if (m > 12) { m = 1; y++; }
   _checkinYear = y; _checkinMonth = m;
+  // 同步下拉框（如果存在）
+  const ySel = document.getElementById('ckinYearSel');
+  const mSel = document.getElementById('ckinMonthSel');
+  if (ySel && [...ySel.options].some(o => +o.value === y)) ySel.value = y;
+  if (mSel) mSel.value = m;
   await renderCheckinCalendarOnly(y, m);
 };
 
-// 仅刷新签到日历（不重渲整个积分页）
+// 仅刷新签到日历网格（不重渲整个积分页）
 async function renderCheckinCalendarOnly(year, month) {
-  const calBox = document.getElementById('checkinCal');
-  if (!calBox) return;
+  const grid = document.getElementById('ckinGrid');
+  if (!grid) return;
   try {
     const r = await api.checkin.calendar(year, month);
     if (!r || !r.success) return;
     const d = r.data;
-    const weekdayNames = ['日', '一', '二', '三', '四', '五', '六'];
     const firstDay = new Date(d.year, d.month - 1, 1);
-    const firstWeekday = firstDay.getUTCDay();
+    const startWeekday = (firstDay.getUTCDay() + 6) % 7; // 周一=0
     const daysInMonth = new Date(d.year, d.month, 0).getUTCDate();
     const checkedSet = new Set((d.checkedDates || []).map(x => x.date));
     const todayStr = new Date().toISOString().slice(0, 10);
     const cells = [];
-    for (let i = 0; i < firstWeekday; i++) cells.push(`<span class="cal-empty"></span>`);
+    for (let i = 0; i < startWeekday; i++) cells.push(`<span class="ckin-cell empty"></span>`);
     for (let dd = 1; dd <= daysInMonth; dd++) {
       const ds = `${d.year}-${String(d.month).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
       const isChk = checkedSet.has(ds);
       const isTd = ds === todayStr;
-      cells.push(`<span class="cal-day${isChk ? ' cal-checked' : ''}${isTd ? ' cal-today' : ''}">${dd}${isChk ? '✅' : ''}</span>`);
+      cells.push(`<span class="ckin-cell${isChk ? ' checked' : ''}${isTd ? ' today' : ''}">${dd}${isChk ? '<em>✓</em>' : ''}</span>`);
     }
-    calBox.innerHTML = `
-      <div class="cal-nav">
-        <button class="ghost" onclick="shiftCheckinMonth(-1)">‹</button>
-        <span class="cal-title">${d.year} 年 ${d.month} 月</span>
-        <button class="ghost" onclick="shiftCheckinMonth(1)">›</button>
-      </div>
-      <div class="cal-weekdays">${weekdayNames.map(w => `<span>${w}</span>`).join('')}</div>
-      <div class="cal-grid">${cells.join('')}</div>
-    `;
+    while (cells.length < 42) cells.push(`<span class="ckin-cell empty"></span>`);
+    grid.innerHTML = cells.join('');
   } catch {}
 }
 
