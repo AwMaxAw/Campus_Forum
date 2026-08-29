@@ -57,9 +57,15 @@ export const EXP = {
 /**
  * 依据累计积分算等级信息（前端展示用，逻辑与后端 getLevelInfo 一致，不返回头衔）。
  * @param {number} expRaw
+ * @param {string} [role]  用户角色，如果是 'ops_admin' 直接返回 Lv.999
  * @returns {{level:number,currentBase:number,nextBase:number,exp:number,progress:number,toNext:number}}
  */
-export function getLevelInfo(expRaw) {
+export function getLevelInfo(expRaw, role) {
+  // 运维管理员 → 永远 Lv.999
+  if (role === 'ops_admin') {
+    const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
+    return { level: 999, currentBase: 0, nextBase: 0, exp, progress: 1, toNext: 0, isAdmin: true };
+  }
   const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
   const lastIdx = LEVEL_THRESHOLDS.length - 1;
   const lastThreshold = LEVEL_THRESHOLDS[lastIdx];
@@ -592,5 +598,14 @@ export const admin = {
     if (!tokenCache) return { success: false, message: '请先登录' };
     if (!uid) return { success: false, message: '缺少 uid' };
     return request(`/api/admin/users/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+  },
+  /** 调整用户积分（运维管理员专属） */
+  async adjustExp(uid, expPoints) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!uid) return { success: false, message: '缺少 uid' };
+    return request(`/api/admin/users/${encodeURIComponent(uid)}/exp`, {
+      method: 'PATCH',
+      body: { expPoints: Math.floor(Number(expPoints) || 0) },
+    });
   },
 };

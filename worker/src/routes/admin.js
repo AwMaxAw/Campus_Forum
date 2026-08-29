@@ -72,7 +72,7 @@ admin.get('/users', requireAdmin(), async (c) => {
     const rows = await db
       .prepare(
         `SELECT u.uid, u.nickname, u.role, u.bio, u.avatar_url, u.created_at,
-                u.is_banned, u.last_login_at,
+                u.is_banned, u.last_login_at, u.exp_points,
                 (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count
          FROM users u
          ORDER BY u.created_at ASC`
@@ -88,6 +88,7 @@ admin.get('/users', requireAdmin(), async (c) => {
       isBanned: !!r.is_banned,
       lastLoginAt: r.last_login_at || null,
       postCount: r.post_count || 0,
+      expPoints: Number(r.exp_points || 0),
     }));
     return c.json(ok(data, { total: data.length }));
   } catch (e) {
@@ -364,6 +365,36 @@ admin.delete('/posts/:id', requireAdmin(), async (c) => {
     return c.json(ok({ id, deleted: true }));
   } catch (e) {
     return fail(`[admin delete post] ${e.name}: ${e.message}`, 500);
+  }
+});
+
+// ==================== 调整用户积分（运维管理员专属）====================
+// body: { expPoints: number }
+admin.patch('/users/:uid/exp', requireAdmin(), async (c) => {
+  try {
+    const targetUid = (c.req.param('uid') || '').trim();
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+    const newExp = body && body.expPoints;
+    if (typeof newExp !== 'number' || !Number.isFinite(newExp) || newExp < 0) {
+      return fail('expPoints 必须是非负整数');
+    }
+    const db = c.env.DB;
+    const target = await db.prepare('SELECT uid, nickname, exp_points FROM users WHERE uid = ?').bind(targetUid).first();
+    if (!target) return fail('用户不存在', 404);
+
+    const oldExp = Number(target.exp_points || 0);
+    await db.prepare("UPDATE users SET exp_points = ?, updated_at = datetime('now') WHERE uid = ?")
+      .bind(Math.floor(newExp), targetUid).run();
+
+    return c.json(ok({
+      uid: targetUid,
+      nickname: target.nickname,
+      oldExp,
+      newExp: Math.floor(newExp),
+    }));
+  } catch (e) {
+    return fail(`[admin adjust exp] ${e.name}: ${e.message}`, 500);
   }
 });
 

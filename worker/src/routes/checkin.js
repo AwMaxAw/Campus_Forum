@@ -33,6 +33,25 @@ function utcDateOf(daysOffset) {
   return d.toISOString().slice(0, 10);
 }
 
+// 每日运势：基于 日期+UID 做 hash → 保证同一天同一个人运势固定，不同天不同
+// 五个等级：大凶 / 小凶 / 中平 / 小吉 / 大吉
+const FORTUNE_LEVELS = ['大凶', '小凶', '中平', '中平', '中平', '小吉', '大吉']; // 概率分布
+function pickFortune(uid, date) {
+  const seed = `${date}|${uid}`;
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
+  const idx = Math.abs(h) % FORTUNE_LEVELS.length;
+  return FORTUNE_LEVELS[idx];
+}
+// 运势 emoji 和颜色
+const FORTUNE_STYLE = {
+  '大凶': { emoji: '😱', color: '#dc2626' },
+  '小凶': { emoji: '😟', color: '#ea580c' },
+  '中平': { emoji: '🙂', color: '#ca8a04' },
+  '小吉': { emoji: '😊', color: '#16a34a' },
+  '大吉': { emoji: '🎉', color: '#2563eb' },
+};
+
 // ==================== 执行签到 ====================
 checkin.post('/', requireAuth(), async (c) => {
   const payload = c.get('jwtPayload');
@@ -84,11 +103,18 @@ checkin.post('/', requireAuth(), async (c) => {
   // 5) 加分 + 系统通知
   await addExp(db, uid, gained, 'checkin', `每日签到成功（连续 ${streak} 天）`);
 
+  // 6) 今日运势
+  const fortune = pickFortune(uid, today);
+  const fortuneStyle = FORTUNE_STYLE[fortune];
+
   return c.json(ok({
     date: today,
     gained,
     streak,
     isBonusDay: streak >= EXP.CHECKIN_STREAK_DAYS && streak % EXP.CHECKIN_STREAK_DAYS === 0,
+    fortune,
+    fortuneEmoji: fortuneStyle.emoji,
+    fortuneColor: fortuneStyle.color,
   }));
 });
 

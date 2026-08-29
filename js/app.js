@@ -2151,7 +2151,8 @@ window.doCheckinAction = async function () {
   }
   const d = r.data;
   const bonusText = d.isBonusDay ? `（🎁 连续 ${d.streak} 天额外奖励 +${api.EXP.CHECKIN_STREAK_BONUS}）` : '';
-  alert(`✅ 签到成功！获得 ${d.gained} 积分${bonusText}，连续签到 ${d.streak} 天。`);
+  const fortuneLine = d.fortune ? `\n\n${d.fortuneEmoji || '🎭'} 今日运势：${d.fortune}${d.streak >= 3 ? '\n' + '★'.repeat(Math.min(5, Math.ceil((d.streak % 7) + 1) * 5 / 7)) : ''}` : '';
+  alert(`✅ 签到成功！获得 ${d.gained} 积分${bonusText}，连续签到 ${d.streak} 天。${fortuneLine}`);
   refreshNotificationBadge();
   location.hash = 'exp'; // 重新渲染积分页刷新日历+积分
 };
