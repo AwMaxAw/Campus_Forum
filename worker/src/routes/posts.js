@@ -105,10 +105,11 @@ posts.get('/', async (c) => {
       whereParts.push('p.author_uid = ?');
       params.push(author);
     }
-    // 分区过滤：按作者 UID 前缀（2611=广五本部初中部 / 2612=广五本部高中部 / 2621=金碧校区初中部 / 2622=金碧校区高中部）
+    // 分区过滤：优先按帖子自身 region 字段，region 为空时回退到 author_uid 前缀
+    // 运维管理员（非标准 UID 前缀）发帖时可选定 region 使其在目标分区可见
     if (region && /^26[12][12]$/.test(region)) {
-      whereParts.push("CAST(p.author_uid AS TEXT) LIKE ?");
-      params.push(`${region}%`);
+      whereParts.push(`(p.region = ? OR (p.region IS NULL AND CAST(p.author_uid AS TEXT) LIKE ?))`);
+      params.push(region, `${region}%`);
     }
     if (q) {
       whereParts.push('(p.title LIKE ? OR p.content LIKE ?)');
@@ -379,9 +380,17 @@ posts.post('/', requireAuth(), async (c) => {
       pinOrder = (maxRow && maxRow.m ? maxRow.m : 0) + 1;
     }
 
+    // region：运维管理员发帖时可选定帖子所属分区（使帖子在目标分区可见）；非管理员忽略此参数
+    // region 合法值为 2611/2612/2621/2622，非法或未传则存 NULL（靠 author_uid 前缀过滤）
+    let postRegion = null;
+    if (isAdmin) {
+      const r = (body.region || '').trim();
+      if (/^26[12][12]$/.test(r)) postRegion = r;
+    }
+
     const result = await db
-      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, image_ids, is_pinned, pin_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
-      .bind(uid, title, content, category, tagsStr, imageIds.length > 0 ? JSON.stringify(imageIds) : null, isPinned ? 1 : 0, pinOrder)
+      .prepare(`INSERT INTO posts (author_uid, title, content, category, tags, image_ids, is_pinned, pin_order, region, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`)
+      .bind(uid, title, content, category, tagsStr, imageIds.length > 0 ? JSON.stringify(imageIds) : null, isPinned ? 1 : 0, pinOrder, postRegion)
       .run();
 
     const postId = result && result.meta && typeof result.meta.last_row_id === 'number'

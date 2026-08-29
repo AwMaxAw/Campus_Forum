@@ -1335,11 +1335,12 @@ function renderRegister(app) {
   document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
 }
 
-// 发帖状态：标签数组 + 选中分区 key + 置顶 + 已上传图片
+// 发帖状态：标签数组 + 选中分区 key + 置顶 + 已上传图片 + 管理员分区选定
 let draftPostTags = [];
 let draftPostCategory = 'general';
 let draftPostPinned = false;
 let draftPostImages = [];  // [{ id, url, dataUrl, filename }]
+let draftPostRegion = '';   // 运维管理员选定的帖子分区（2611/2612/2621/2622，空=按作者UID前缀过滤）
 
 function renderPost(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
@@ -1348,6 +1349,7 @@ function renderPost(app) {
   draftPostTags = [];
   draftPostCategory = 'general';
   draftPostPinned = false;
+  draftPostRegion = '';
   draftPostImages = [];  // 重置图片
 
   // 分区下拉选项：meta 仅管理员可见
@@ -1403,6 +1405,15 @@ function renderPost(app) {
         <input type="checkbox" id="pinCheckbox" style="width:16px;height:16px;cursor:pointer">
         <label for="pinCheckbox" style="font-size:13px;color:#424245;cursor:pointer">📌 置顶此帖（管理员专属，置顶帖将显示在列表最前面）</label>
       </div>
+      <div style="margin-bottom:14px">
+        <label for="postRegionSelect" style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
+          🗺 发布分区（管理员专属：选择此帖在哪个校区/年级分区可见；不选则所有分区可见）
+        </label>
+        <select id="postRegionSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          <option value="">全部分区可见（不指定）</option>
+          ${REGIONS.map(r => `<option value="${r.prefix}">${escapeHtml(r.label)}</option>`).join('')}
+        </select>
+      </div>
       ` : ''}
 
       <button id="postBtn" onclick="doPost()">发布</button>
@@ -1421,6 +1432,13 @@ function renderPost(app) {
   if (pinCheckbox) {
     pinCheckbox.addEventListener('change', () => {
       draftPostPinned = pinCheckbox.checked;
+    });
+  }
+  // --- 发布分区下拉（管理员）---
+  const regionSelect = document.getElementById('postRegionSelect');
+  if (regionSelect) {
+    regionSelect.addEventListener('change', () => {
+      draftPostRegion = regionSelect.value;
     });
   }
 
@@ -3237,7 +3255,7 @@ window.doPost = async function doPost() {
   const btn = document.getElementById('postBtn');
   btn.disabled = true; btn.textContent = '发布中...';
   try {
-    const r = await api.posts.create(title, content, tags, category, draftPostPinned, imageIds);
+    const r = await api.posts.create(title, content, tags, category, draftPostPinned, imageIds, draftPostRegion);
     if (r.success) { location.hash = 'forum'; refreshNotificationBadge(); }
     else alert(r.message || '发布失败');
   } finally {

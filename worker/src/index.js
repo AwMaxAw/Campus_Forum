@@ -102,6 +102,13 @@ app.use('*', async (c, next) => {
       if (r1b && r1b.c === 0) {
         await c.env.DB.prepare('ALTER TABLE posts ADD COLUMN image_ids TEXT').run();
       }
+      // posts.region（运维管理员发帖可选定分区）
+      const r1c = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('posts') WHERE name='region'")
+        .first();
+      if (r1c && r1c.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE posts ADD COLUMN region TEXT').run();
+      }
       // users.is_banned
       const r2 = await c.env.DB
         .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='is_banned'")

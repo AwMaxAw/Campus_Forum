@@ -416,11 +416,13 @@ export const posts = {
    *   - imageIds: 数组<number>（已上传的图片 ID 列表，最多 9 张）
    * 后端会优先采用前端传的 category；如果不合法 → 管理员级校验不通过 → 再回退 general。
    */
-  async create(title, content, tags = [], category = 'general', isPinned = false, imageIds = []) {
+  async create(title, content, tags = [], category = 'general', isPinned = false, imageIds = [], region = '') {
     if (!tokenCache) return { success: false, message: '请先登录' };
     if (!Array.isArray(tags)) tags = [];
     if (!Array.isArray(imageIds)) imageIds = [];
-    return request('/api/posts', { method: 'POST', body: { title, content, tags, category, isPinned, imageIds } });
+    const body = { title, content, tags, category, isPinned, imageIds };
+    if (region) body.region = region; // 仅运维管理员传，其他传空则后端忽略
+    return request('/api/posts', { method: 'POST', body });
   },
   async remove(id) {
     return request(`/api/posts/${id}`, { method: 'DELETE' });
