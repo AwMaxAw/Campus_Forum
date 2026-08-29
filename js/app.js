@@ -3131,6 +3131,7 @@ async function renderAdminGuildsContent() {
     case 'createRequests': return renderAdminGuildsCreateRequests(host);
   }
 }
+window.renderAdminGuildsContent = renderAdminGuildsContent;
 
 // ---- 所有公会 tab ----
 async function renderAdminGuildsList(host) {
