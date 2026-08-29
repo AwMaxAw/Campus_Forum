@@ -87,7 +87,6 @@ app.route('/api/notifications', notificationsRoutes);
 let autoMigrated = false;
 app.use('*', async (c, next) => {
   if (!autoMigrated && c.env && c.env.DB) {
-    autoMigrated = true;
     try {
       // posts.pin_order
       const r1 = await c.env.DB
@@ -196,8 +195,9 @@ app.use('*', async (c, next) => {
         `).run();
         await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_notifications_uid ON notifications(uid, is_read, created_at DESC)').run();
       }
+      autoMigrated = true; // 全部成功才标记，失败则下次请求重试
     } catch (e) {
-      console.warn('[migrate] 自动迁移失败（可忽略，可能列已存在）：', e && e.message);
+      console.warn('[migrate] 自动迁移失败（下次请求将重试）：', e && e.message);
     }
   }
   await next();
