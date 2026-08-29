@@ -2395,6 +2395,8 @@ function adminConfirm(opts) {
     mask.className = 'modal-mask';
     mask.style.zIndex = '120';
     const needInput = !!opts.requireText;
+    const requireList = Array.isArray(opts.requireText) ? opts.requireText : (opts.requireText ? [opts.requireText] : []);
+    const requireDisplay = requireList.map(escapeHtml).join(' 或 ');
     mask.innerHTML = `
       <div class="modal" style="max-width:460px">
         <div class="modal-header">
@@ -2404,7 +2406,7 @@ function adminConfirm(opts) {
           ${opts.message || ''}
           ${needInput ? `
             <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e5e7eb">
-              <div style="font-size:12px;color:#6b7280;margin-bottom:6px">请输入 <b>${escapeHtml(opts.requireText)}</b> 以确认：</div>
+              <div style="font-size:12px;color:#6b7280;margin-bottom:6px">请输入 <b>${requireDisplay}</b> 以确认：</div>
               <input id="adminConfirmInput" type="text" autocomplete="off" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:14px" />
             </div>` : ''}
         </div>
@@ -2431,8 +2433,7 @@ function adminConfirm(opts) {
 
     if (needInput) {
       const input = mask.querySelector('#adminConfirmInput');
-      const target = opts.requireText;
-      const check = () => { okBtn.disabled = input.value.trim() !== target; };
+      const check = () => { okBtn.disabled = !requireList.includes(input.value.trim()); };
       input.addEventListener('input', check);
       input.addEventListener('keydown', e => { if (e.key === 'Enter' && !okBtn.disabled) close(true); });
       setTimeout(() => input.focus(), 0);
@@ -2481,13 +2482,13 @@ async function confirmUnban(uid, nick) {
   }
 }
 
-// ---- 注销（最危险：物理删除 + 级联，不可恢复，必须输入昵称解锁）----
+// ---- 注销（最危险：物理删除 + 级联，不可恢复，必须输入 UID 或昵称解锁）----
 async function confirmDelete(uid, nick, posts) {
   const ok = await adminConfirm({
     title: '永久注销账号',
     danger: true,
     confirmText: '确认永久注销',
-    requireText: nick,
+    requireText: [uid, nick],
     message: `<b style="color:#dc2626">⚠ 此操作不可恢复！</b><br/>
               确定要永久注销账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>
               将<b>物理删除</b>该用户及其所有关联数据，包括：
@@ -2497,7 +2498,7 @@ async function confirmDelete(uid, nick, posts) {
                 <li>所有私信记录</li>
                 <li>点赞、收藏数据</li>
               </ul>
-              为防止误操作，请在下方输入该账号昵称 <b>${escapeHtml(nick)}</b> 以解锁确认按钮。`,
+              为防止误操作，请在下方输入该账号的 <b>UID（${escapeHtml(uid)}）</b> 或 <b>昵称（${escapeHtml(nick)}）</b> 以解锁确认按钮。`,
   });
   if (!ok) return;
   const r = await api.admin.deleteUser(uid);
