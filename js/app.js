@@ -123,6 +123,9 @@ function categoryBadgeHtml(key, opts = {}) {
     ? `onclick="event.stopPropagation();setHomeFilter('category',${escapeHtml(JSON.stringify(key))})" title="按「${label}」分区筛选"`
     : '';
   const cursor = opts.clickable ? 'cursor:pointer;' : '';
+  if (opts.compact) {
+    return `<span ${clickAttrs} style="${cursor}color:${color};background:${light};padding:0 5px;border-radius:8px;font-size:10px;margin-right:4px;font-weight:500;line-height:16px">${escapeHtml(label)}</span>`;
+  }
   return `<span ${clickAttrs} style="${cursor}color:${color};background:${light};padding:1px 8px;border-radius:12px;font-size:12px;margin-right:6px;font-weight:500">${escapeHtml(label)}</span>`;
 }
 function toLightBg(hex) {
@@ -1005,9 +1008,24 @@ async function renderForum(app) {
         </div>
       </div>
 
-      <!-- 右侧列：发新帖（独立框）+ 搜索面板（独立框），整体 sticky 浮动 -->
+      <!-- 右侧列：发新帖（独立框）+ 广场展示设置 + 搜索面板（独立框），整体 sticky 浮动 -->
       <div class="forum-side-col">
         <button class="forum-newpost-btn" onclick="location.hash='post'">+ 发新帖</button>
+
+        <!-- 广场展示设置 -->
+        <div class="card forum-view-switch">
+          <div class="forum-view-title">🎨 广场展示设置</div>
+          <div class="forum-view-btns">
+            <button id="viewModeCards" class="forum-view-btn" data-mode="cards" onclick="setForumView('cards')">
+              <span class="forum-view-icon">🟦🟦</span>
+              <span>卡片瀑布流</span>
+            </button>
+            <button id="viewModeList" class="forum-view-btn" data-mode="list" onclick="setForumView('list')">
+              <span class="forum-view-icon">▤</span>
+              <span>列表视图</span>
+            </button>
+          </div>
+        </div>
 
       <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里；不再显示用户匹配结果） -->
       <aside class="forum-aside card search-panel">
@@ -1131,27 +1149,50 @@ async function renderForum(app) {
     const pinnedPosts = hasFilter ? [] : data.filter(p => p.isPinned);
     const normalPosts = hasFilter ? data : data.filter(p => !p.isPinned);
 
+    // 缓存供视图切换使用
+    _lastForumPostsCache = data;
+
+    const viewMode = getForumViewMode();
     let html = '';
-    if (pinnedPosts.length > 0) {
-      html += `<div id="pinnedSection" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
-          <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
-          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
-          <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
-        </div>
-        <div id="pinnedExpanded" style="display:none">
-          ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
-        </div>
-        <div id="pinnedCollapsed">
-          ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
-        </div>
-      </div>`;
+
+    if (viewMode === 'cards') {
+      // 瀑布流模式（默认）
+      listEl.className = 'waterfall-wrap';
+      if (pinnedPosts.length > 0) {
+        html += `<div class="pinned-banner" style="margin-bottom:8px">📌 置顶帖 ${pinnedPosts.length} 条</div>`;
+        html += `<div class="waterfall-col">${pinnedPosts.map(p => postCardCompact(p)).join('')}</div>`;
+      }
+      html += `<div class="waterfall-col">${normalPosts.map(p => postCardCompact(p)).join('')}</div>`;
+    } else {
+      // 列表视图
+      listEl.className = 'card';
+      if (pinnedPosts.length > 0) {
+        html += `<div id="pinnedSection" style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
+            <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+            <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+            <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
+          </div>
+          <div id="pinnedExpanded" style="display:none">
+            ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
+          </div>
+          <div id="pinnedCollapsed">
+            ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
+          </div>
+        </div>`;
+      }
+      // 供折叠行展开/折回使用：把置顶帖完整数据存到全局
+      window._pinnedData = pinnedPosts.slice();
+      html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
+      bindPinnedEvents();
     }
-    // 供折叠行展开/折回使用：把置顶帖完整数据存到全局
-    window._pinnedData = pinnedPosts.slice();
-    html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
-    listEl.outerHTML = html;
-    bindPinnedEvents();
+    listEl.innerHTML = html;
+
+    // 初始化视图切换按钮的激活态
+    const cardsBtn = document.getElementById('viewModeCards');
+    const listBtn = document.getElementById('viewModeList');
+    if (cardsBtn) cardsBtn.classList.toggle('active', viewMode === 'cards');
+    if (listBtn)  listBtn.classList.toggle('active', viewMode === 'list');
   } catch (e) {
     listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
@@ -1159,6 +1200,114 @@ async function renderForum(app) {
   // 确保用户搜索 Promise 不抛未处理异常（用户搜索渲染自己处理异常）
   userSearchPromise.catch(() => {});
 }
+
+// ==================== 广场展示视图模式（localStorage 持久化）====================
+const VIEW_MODE_KEY = 'forumViewMode';
+function getForumViewMode() {
+  const v = (typeof localStorage !== 'undefined' ? localStorage.getItem(VIEW_MODE_KEY) : null);
+  return v === 'list' ? 'list' : 'cards'; // 默认卡片瀑布流
+}
+function setForumView(mode) {
+  if (mode !== 'cards' && mode !== 'list') return;
+  if (typeof localStorage !== 'undefined') localStorage.setItem(VIEW_MODE_KEY, mode);
+  const old = document.getElementById('postList');
+  if (!old) { // 还没渲染列表（筛选后首屏），等 renderForum 自然渲染
+    const cardsBtn = document.getElementById('viewModeCards');
+    const listBtn = document.getElementById('viewModeList');
+    if (cardsBtn) cardsBtn.classList.toggle('active', mode === 'cards');
+    if (listBtn)  listBtn.classList.toggle('active', mode === 'list');
+    return;
+  }
+  // 切换模式：遍历已有 data-forum-posts 重新渲染
+  const container = old.parentElement; // 原来的 .card 容器
+  if (!container) return;
+  const posts = (container.dataset.forumPosts ? JSON.parse(container.dataset.forumPosts) : null)
+             || _lastForumPostsCache || [];
+  const view = document.getElementById('postList');
+  if (posts.length === 0 || !view) return;
+
+  // 更新按钮激活态
+  const cardsBtn = document.getElementById('viewModeCards');
+  const listBtn = document.getElementById('viewModeList');
+  if (cardsBtn) cardsBtn.classList.toggle('active', mode === 'cards');
+  if (listBtn)  listBtn.classList.toggle('active', mode === 'list');
+
+  // 重新渲染
+  const pinnedPosts = posts.filter(p => p.isPinned);
+  const normalPosts = posts.filter(p => !p.isPinned);
+
+  let html = '';
+  if (mode === 'cards') {
+    // 瀑布流模式：外层 #postList 变 columns 容器
+    if (pinnedPosts.length > 0) {
+      html += `<div class="pinned-banner" style="margin-bottom:8px">📌 置顶帖 ${pinnedPosts.length} 条</div>`;
+      html += `<div class="waterfall-col">${pinnedPosts.map(p => postCardCompact(p)).join('')}</div>`;
+    }
+    html += `<div class="waterfall-col">${normalPosts.map(p => postCardCompact(p)).join('')}</div>`;
+    view.className = 'waterfall-wrap';
+  } else {
+    // 列表视图
+    view.className = 'card';
+    const pinnedHtml = pinnedPosts.length > 0
+      ? `<div id="pinnedSection" style="margin-bottom:12px">
+           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
+             <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+             <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+             <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
+           </div>
+           <div id="pinnedExpanded" style="display:none">
+             ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
+           </div>
+           <div id="pinnedCollapsed">
+             ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
+           </div>
+         </div>`
+      : '';
+    html = pinnedHtml + normalPosts.map(p => postCard(p, { allowClick: true })).join('');
+    window._pinnedData = pinnedPosts.slice();
+    bindPinnedEvents();
+  }
+  view.innerHTML = html;
+}
+// 缓存最近一次帖子列表，供视图切换使用
+let _lastForumPostsCache = [];
+
+// 卡片瀑布流的紧凑小卡（小红书风格，圆角 + 封面 + 标题 + 作者 + stats）
+function postCardCompact(p) {
+  const title = escapeHtml(p.title || '(无标题)');
+  const contentShort = (p.content || '').slice(0, 80);
+  const hasImage = Array.isArray(p.imageIds) && p.imageIds.length > 0;
+  const coverHtml = hasImage
+    ? `<div class="wfall-cover"><img src="${escapeHtml(api.images.getUrl(p.imageIds[0]))}" alt=""></div>`
+    : `<div class="wfall-cover wfall-cover-text">
+         <span class="wfall-emoji">📝</span>
+         <span class="wfall-text-short">${escapeHtml(contentShort || title)}</span>
+       </div>`;
+  const tags = (Array.isArray(p.tags) && p.tags.length)
+    ? `<div class="wfall-tags">${p.tags.slice(0, 2).map(t => `<span>#${escapeHtml(t)}</span>`).join('')}</div>`
+    : '';
+  const pinnedBadge = p.isPinned ? `<span class="wfall-pinned">📌 置顶</span>` : '';
+  const catBadge = categoryBadgeHtml(p.category, { compact: true });
+  return `
+    <div class="wfall-card" data-post-id="${p.id}" onclick="location.hash='#detail/${p.id}'" title="查看详情">
+      ${pinnedBadge}
+      ${coverHtml}
+      <div class="wfall-body">
+        <h4>${title}</h4>
+        <div class="wfall-meta">
+          ${catBadge}
+          <span>${escapeHtml(p.authorNickname || ('用户' + p.authorUid))}</span>
+        </div>
+        ${tags}
+        <div class="wfall-stats">
+          <span>👁 ${p.viewCount || 0}</span>
+          <span>👍 ${p.likeCount || 0}</span>
+          <span>💬 ${p.commentCount || 0}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
 // 置顶帖交互事件委托：在 #pinnedSection 上统一监听 click，按 data-act 派发。
 // 这样 outerHTML 替换出的新元素（折叠行/完整卡片）也能自动响应，避免内联 onclick 在事件处理中替换 DOM 的时序问题（导致要点两次）。
 function bindPinnedEvents() {

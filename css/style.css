@@ -668,3 +668,91 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 .ckin-cell.checked em { font-style: normal; font-size: 10px; opacity: .85; }
 .ckin-cell.today { border: 2px solid #ea580c; font-weight: 700; color: #ea580c; }
 .ckin-cell.checked.today { border: 2px solid #fff; color: #fff; box-shadow: 0 0 0 2px #ea580c; }
+
+/* ==================== 广场展示设置板块 ==================== */
+.forum-view-switch { padding: 10px 12px; }
+.forum-view-title { font-size: 13px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+.forum-view-btns { display: flex; gap: 6px; }
+.forum-view-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 4px; border-radius: 8px; border: 1px solid #d2d2d7;
+  background: #fff; color: #6b7280; font-size: 11px; cursor: pointer;
+  transition: all .15s ease;
+}
+.forum-view-btn:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
+.forum-view-btn.active {
+  border-color: #2563eb; color: #2563eb; background: #eff6ff;
+  box-shadow: 0 0 0 1px rgba(37,99,235,.2);
+}
+.forum-view-icon { font-size: 16px; line-height: 1; }
+
+/* ==================== 卡片瀑布流 ==================== */
+.waterfall-wrap {
+  column-count: 3; column-gap: 12px;
+}
+@media (max-width: 1200px) { .waterfall-wrap { column-count: 2; } }
+@media (max-width: 800px)  { .waterfall-wrap { column-count: 1; } }
+
+.waterfall-col { break-inside: avoid; } /* 让 waterfall-col 整体作为一个列避免被切开（但我们用的是全局 column-count，这个 div 只是分组） */
+/* 实际每个卡片要避免被切到两列 */
+.wfall-card { break-inside: avoid; margin-bottom: 12px; }
+
+.wfall-card {
+  background: #fff; border-radius: 12px; overflow: hidden;
+  border: 1px solid #f0f0f0;
+  cursor: pointer; transition: transform .15s, box-shadow .15s, border-color .15s;
+  position: relative;
+}
+.wfall-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.08);
+  border-color: #d1d5db;
+}
+.wfall-pinned {
+  position: absolute; top: 6px; left: 6px; z-index: 2;
+  background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 600;
+}
+.wfall-cover {
+  width: 100%; overflow: hidden; background: #f3f4f6;
+}
+.wfall-cover img {
+  width: 100%; height: auto; display: block; object-fit: cover;
+  transition: transform .3s;
+}
+.wfall-card:hover .wfall-cover img { transform: scale(1.04); }
+.wfall-cover-text {
+  padding: 28px 14px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+.wfall-emoji { font-size: 28px; }
+.wfall-text-short {
+  font-size: 12px; color: #64748b; text-align: center;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.5;
+}
+.wfall-body { padding: 10px 12px 12px; }
+.wfall-body h4 {
+  font-size: 14px; font-weight: 600; color: #1f2937; margin: 0 0 6px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.4;
+}
+.wfall-meta {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: #6b7280; margin-bottom: 4px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.wfall-meta span:first-child { flex-shrink: 0; }
+.wfall-tags {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;
+}
+.wfall-tags span {
+  font-size: 11px; color: #2563eb; background: #eff6ff;
+  padding: 1px 6px; border-radius: 4px;
+}
+.wfall-stats {
+  display: flex; gap: 10px;
+  font-size: 11px; color: #9ca3af; padding-top: 6px;
+  border-top: 1px dashed #f0f0f0;
+}
