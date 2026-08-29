@@ -248,28 +248,39 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 /* --------------------- 广场：左右分栏（主区 + 右侧搜索小板块） --------------------- */
 .forum-layout {
   display: flex;
-  gap: 14px;
+  gap: 20px;               /* 主区与搜索板块间距拉大，视觉上右侧更靠右 */
   align-items: flex-start;
 }
 .forum-main {
   flex: 1 1 auto;
-  min-width: 0;          /* 防止 flex 子项撑破容器 */
+  min-width: 0;            /* 防止 flex 子项撑破容器 */
 }
 .forum-aside {
-  flex: 0 0 300px;
-  max-width: 320px;
+  flex: 0 0 270px;         /* 搜索小板块缩窄，给左侧帖子区让出空间 */
+  max-width: 280px;
   margin-bottom: 12px;
-  border-radius: 14px;   /* 右侧小板块带圆角 */
+  margin-left: auto;       /* 略微往右贴，左侧主区变大 */
+  border-radius: 14px;     /* 右侧小板块带圆角 */
   box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  /* 固定在视口右侧，随 topbar 之下；内容过多时内部可上下滚动 */
+  position: sticky;
+  top: 72px;               /* 避开 sticky topbar（约 48~52px）再加一点呼吸 */
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .forum-aside .search-row > input { flex: 1 1 100%; }
 @media (max-width: 760px) {
-  .forum-layout { flex-direction: column; }
+  .forum-layout { flex-direction: column; gap: 14px; }
   .forum-aside {
     flex: 0 0 auto;
     width: 100%;
     max-width: none;
-    order: -1;           /* 窄屏时搜索板块移到列表上方 */
+    margin-left: 0;
+    position: static;       /* 窄屏恢复自然流 */
+    max-height: none;
+    overflow: visible;
+    order: -1;              /* 窄屏时搜索板块移到列表上方 */
   }
 }
 

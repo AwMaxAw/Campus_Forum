@@ -902,7 +902,7 @@ async function renderForum(app) {
     const tags = (resp.data && resp.data.tags) || [];
     if (tags.length === 0) { box.outerHTML = ''; return; }
     const activeTags = new Set(tagList(filters.tag));
-    box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 最近 30 天热门标签（点击多选筛选，可叠加）：</div>
+    box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 热门标签（点击多选筛选，可叠加）：</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">${tags.map(t =>
         `<span class="tag-chip ${activeTags.has(t.tag)?'active-tag':''}" onclick="setHomeFilter('tag',${escapeHtml(JSON.stringify(t.tag))})" title="该标签出现 ${t.count} 次，点击切换筛选">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
       ).join('')}</div>`;
