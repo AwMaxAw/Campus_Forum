@@ -872,11 +872,53 @@ async function renderForum(app) {
       listEl.outerHTML = `<div class="empty">${hasFilter ? '😶 没有匹配的帖子，试试 🔎 清除条件 重新搜索～' : '还没有帖子，快来发第一条吧'}</div>`;
       return;
     }
-    listEl.outerHTML = data.map(p => postCard(p, { allowClick: true })).join('');
+    // 分置顶帖和普通帖
+    const pinnedPosts = data.filter(p => p.isPinned);
+    const normalPosts = data.filter(p => !p.isPinned);
+
+    let html = '';
+    if (pinnedPosts.length > 0) {
+      html += `<div id="pinnedSection" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" onclick="window._togglePinned()">
+          <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击折叠</span>
+        </div>
+        <div id="pinnedExpanded">
+          ${pinnedPosts.map(p => postCard(p, { allowClick: true })).join('')}
+        </div>
+        <div id="pinnedCollapsed" style="display:none">
+          ${pinnedPosts.map(p => `
+            <div class="card clickable" onclick="location.hash='#detail/${p.id}'" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+              <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
+              ${categoryBadgeHtml(p.category)}
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
+              <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(p.authorNickname || ('用户'+p.authorUid))}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }
+    html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
+    listEl.outerHTML = html;
   } catch (e) {
     listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
 }
+window._togglePinned = function _togglePinned() {
+  const expanded = document.getElementById('pinnedExpanded');
+  const collapsed = document.getElementById('pinnedCollapsed');
+  const hint = document.getElementById('pinnedToggleHint');
+  if (!expanded || !collapsed) return;
+  if (expanded.style.display === 'none') {
+    expanded.style.display = '';
+    collapsed.style.display = 'none';
+    if (hint) hint.textContent = '点击折叠';
+  } else {
+    expanded.style.display = 'none';
+    collapsed.style.display = '';
+    if (hint) hint.textContent = '点击展开';
+  }
+};
 window.homeRunSearch = function homeRunSearch() {
   const sq = document.getElementById('sqInput');
   const stag = document.getElementById('stagInput');
