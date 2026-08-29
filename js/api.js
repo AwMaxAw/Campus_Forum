@@ -38,10 +38,9 @@ export function isCategoryAdminOnly(key) {
 }
 
 // ======================== 等级积分系统（前端常量 + 计算，必须与 worker/src/utils/exp.js 一致）========================
-// 累计积分 → 升级阈值；Lv1=0 起，Lv10=4500；超过表内最高按每级 +1000 递增
-export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500];
-// 等级头衔（展示用）
-export const LEVEL_TITLES = ['新手', '学徒', '常客', '熟手', '达人', '专家', '导师', '元老', '宗师', '传说'];
+// 累计积分 → 升级阈值；基数小故阈值偏小；超过表内最高按 LEVEL_STEP_BEYOND 递增
+export const LEVEL_THRESHOLDS = [0, 20, 50, 90, 150, 230, 330, 460, 620, 820];
+export const LEVEL_STEP_BEYOND = 220; // 超过 Lv10 后每升一级所需的额外积分
 // 行为积分（加分点，与后端 EXP 一致；仅作展示/说明用）
 export const EXP = {
   POST: 5,                // 发帖
@@ -53,9 +52,9 @@ export const EXP = {
 };
 
 /**
- * 依据累计积分算等级信息（前端展示用，逻辑与后端 getLevelInfo 一致）。
+ * 依据累计积分算等级信息（前端展示用，逻辑与后端 getLevelInfo 一致，不返回头衔）。
  * @param {number} expRaw
- * @returns {{level:number,currentBase:number,nextBase:number,exp:number,progress:number,toNext:number,title:string}}
+ * @returns {{level:number,currentBase:number,nextBase:number,exp:number,progress:number,toNext:number}}
  */
 export function getLevelInfo(expRaw) {
   const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
@@ -64,14 +63,14 @@ export function getLevelInfo(expRaw) {
 
   let level = 1;
   let currentBase = 0;
-  let nextBase = LEVEL_THRESHOLDS[1] ?? LEVEL_THRESHOLDS[0] + 1000;
+  let nextBase = LEVEL_THRESHOLDS[1] ?? LEVEL_THRESHOLDS[0] + LEVEL_STEP_BEYOND;
 
   if (exp < lastThreshold) {
     for (let i = 0; i < LEVEL_THRESHOLDS.length; i++) {
       if (exp >= LEVEL_THRESHOLDS[i]) {
         level = i + 1;
         currentBase = LEVEL_THRESHOLDS[i];
-        nextBase = i + 1 < LEVEL_THRESHOLDS.length ? LEVEL_THRESHOLDS[i + 1] : LEVEL_THRESHOLDS[i] + 1000;
+        nextBase = i + 1 < LEVEL_THRESHOLDS.length ? LEVEL_THRESHOLDS[i + 1] : LEVEL_THRESHOLDS[i] + LEVEL_STEP_BEYOND;
       } else {
         break;
       }
@@ -79,18 +78,17 @@ export function getLevelInfo(expRaw) {
   } else {
     level = LEVEL_THRESHOLDS.length;
     currentBase = lastThreshold;
-    while (exp >= currentBase + 1000) {
-      currentBase += 1000;
+    while (exp >= currentBase + LEVEL_STEP_BEYOND) {
+      currentBase += LEVEL_STEP_BEYOND;
       level += 1;
     }
-    nextBase = currentBase + 1000;
+    nextBase = currentBase + LEVEL_STEP_BEYOND;
   }
 
   const progress = nextBase > currentBase
     ? Math.max(0, Math.min(1, (exp - currentBase) / (nextBase - currentBase)))
     : 1;
-  const title = LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)] || `Lv.${level}`;
-  return { level, currentBase, nextBase, exp, progress, toNext: Math.max(0, nextBase - exp), title };
+  return { level, currentBase, nextBase, exp, progress, toNext: Math.max(0, nextBase - exp) };
 }
 
 const TOKEN_KEY = 'campus_forum_token';
@@ -304,6 +302,30 @@ export const users = {
   async search(q) {
     if (!q) return { success: false, message: '请输入搜索关键字' };
     return request(`/api/users/search?q=${encodeURIComponent(q)}`, { needsAuth: false });
+  },
+};
+
+// ======================== 系统通知（积分变动等，导航栏铃铛入口）========================
+export const notifications = {
+  /** 我的系统通知列表（分页，倒序）。返回 { data: [...], pagination } */
+  async list(page = 1, pageSize = 20) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/notifications?page=${page}&pageSize=${pageSize}`);
+  },
+  /** 未读通知数（导航栏铃铛红点）。返回 { data: { count } } */
+  async unreadCount() {
+    if (!tokenCache) return { success: true, data: { count: 0 } };
+    return request('/api/notifications/unread-count');
+  },
+  /** 全部标记已读 */
+  async markAllRead() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/notifications/read', { method: 'POST' });
+  },
+  /** 标记单条已读 */
+  async markRead(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/notifications/read/${encodeURIComponent(id)}`, { method: 'POST' });
   },
 };
 

@@ -389,7 +389,7 @@ posts.post('/', requireAuth(), async (c) => {
     if (!postId) return fail('帖子创建失败（DB 返回空 id）', 500);
 
     // 发帖积分：作者 +EXP.POST（失败不阻塞主流程）
-    await addExp(db, uid, EXP.POST);
+    await addExp(db, uid, EXP.POST, 'post', '您发布了帖子');
 
     const created = await db
       .prepare(

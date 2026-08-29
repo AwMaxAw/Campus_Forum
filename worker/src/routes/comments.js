@@ -124,9 +124,9 @@ comments.post('/', requireAuth(), async (c) => {
   await db.prepare('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?').bind(postId).run();
 
   // 5) 积分：评论者 +EXP.COMMENT；若回复了他人评论，被回复者 +EXP.REPLIED（自己回复自己不加分）
-  await addExp(db, uid, EXP.COMMENT);
+  await addExp(db, uid, EXP.COMMENT, 'comment', '您发表了评论');
   if (repliedAuthorUid && repliedAuthorUid !== uid) {
-    await addExp(db, repliedAuthorUid, EXP.REPLIED);
+    await addExp(db, repliedAuthorUid, EXP.REPLIED, 'replied', '您的评论被回复');
   }
 
   // 6) 返回完整对象

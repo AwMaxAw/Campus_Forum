@@ -131,6 +131,18 @@ CREATE TABLE IF NOT EXISTS feedbacks (
   FOREIGN KEY (author_uid) REFERENCES users(uid)
 );
 
+-- 系统通知表（积分变动等系统消息，导航栏铃铛入口）
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL,                       -- 接收者 UID
+  type TEXT NOT NULL,                      -- 类型：post / comment / liked / replied / exp 等
+  content TEXT NOT NULL,                  -- 展示正文
+  exp_delta INTEGER NOT NULL DEFAULT 0,    -- 关联的积分变化（0 表示无积分变动）
+  is_read INTEGER NOT NULL DEFAULT 0,     -- 0/1 是否已读
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (uid) REFERENCES users(uid)
+);
+
 -- ============ 索引（SQLite 默认 B-tree 主键够用，但常用查询建索引更稳）============
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_uid);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
@@ -142,6 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_from_to ON messages(from_uid, to_uid, cr
 CREATE INDEX IF NOT EXISTS idx_messages_to_read ON messages(to_uid, is_read, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_post ON images(post_id);
 CREATE INDEX IF NOT EXISTS idx_images_author ON images(author_uid);
+CREATE INDEX IF NOT EXISTS idx_notifications_uid ON notifications(uid, is_read, created_at DESC);
 
 -- ============ 种子数据：预置管理员用户 + 2 条欢迎帖 ============
 -- 注意：

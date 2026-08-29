@@ -179,6 +179,14 @@ async function renderTopBar() {
       if (r.success) unreadMsg = r.data.count || 0;
     } catch {}
   }
+  // 系统通知未读数（导航栏铃铛红点）
+  let unreadNotif = 0;
+  if (loggedIn) {
+    try {
+      const r2 = await api.notifications.unreadCount();
+      if (r2.success) unreadNotif = r2.data.count || 0;
+    } catch {}
+  }
 
   if (loggedIn && me) {
     const roleBadge = me.role === 'ops_admin'
@@ -204,7 +212,10 @@ async function renderTopBar() {
     </select>${otherBadge}`;
     // 等级徽标：依据累计积分算等级，点击进积分页（expPoints 可能旧缓存为空，兜底 0）
     const _li = api.getLevelInfo(Number(me.expPoints || 0));
-    const levelBadge = `<a href="#exp" class="nav-level" onclick="event.stopPropagation()" title="等级 Lv.${_li.level} ${_li.title}｜累计积分 ${_li.exp}（点开看详情）">Lv.${_li.level}</a>`;
+    const levelBadge = `<a href="#exp" class="nav-level" onclick="event.stopPropagation()" title="等级 Lv.${_li.level}｜累计积分 ${_li.exp}（点开看详情）">Lv.${_li.level}</a>`;
+    // 系统消息铃铛：未读时显示红点数字
+    const notifBadge = unreadNotif > 0 ? `<span class="unread-badge">${unreadNotif}</span>` : '';
+    const bellHtml = `<a href="#notifications" class="nav-bell" onclick="event.stopPropagation()" title="系统消息">🔔${notifBadge}</a>`;
     nav.innerHTML = `
       <span class="nav-right-group">
         <span class="nav-user" title="我的主页" onclick="location.hash='me'">
@@ -213,6 +224,7 @@ async function renderTopBar() {
           <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
           <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
         </span>
+        ${bellHtml}
         <button class="secondary" onclick="doLogout()">退出</button>
       </span>
     `;
@@ -224,11 +236,11 @@ async function renderTopBar() {
       </span>
     `;
   }
-  renderDrawer(loggedIn, me, unreadMsg);
+  renderDrawer(loggedIn, me, unreadMsg, unreadNotif);
 }
 
 // ==================== 左侧抽屉 ====================
-function renderDrawer(loggedIn, me, unreadMsg) {
+function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
   const drawerNav = document.getElementById('drawerNav');
   if (!drawerNav) return;
   const isAdmin = loggedIn && me && (me.role === 'ops_admin');
@@ -239,6 +251,7 @@ function renderDrawer(loggedIn, me, unreadMsg) {
         { label: '日历',     icon: '📅', hash: 'calendar' },
         { label: '我的',     icon: '👤', hash: 'me' },
         { label: '积分',     icon: '🏆', hash: 'exp' },
+        { label: '系统消息', icon: '🔔', hash: 'notifications', badge: unreadNotif || 0 },
         { label: '公告',     icon: '📋', hash: 'announcements' },
         { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
         { label: 'FAQ',      icon: '❓', hash: 'faq' },
@@ -3176,6 +3189,7 @@ function route() {
   else if (path === 'detail' && seg2) renderDetail(app, parseInt(seg2, 10));
   else if (path === 'me') renderMe(app);
   else if (path === 'exp') renderExp(app);
+  else if (path === 'notifications') renderNotifications(app);
   else if (path === 'user' && seg2) renderUserProfile(app, seg2);
   else if (path === 'messages') {
     // 解析查询参数：messages?peer=UID&name=昵称

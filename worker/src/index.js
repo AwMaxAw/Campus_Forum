@@ -50,6 +50,7 @@ import adminRoutes from './routes/admin.js';
 import usersRoutes from './routes/users.js';
 import imagesRoutes from './routes/images.js';
 import feedbacksRoutes from './routes/feedbacks.js';
+import notificationsRoutes from './routes/notifications.js';
 
 const app = new Hono();
 
@@ -79,6 +80,7 @@ app.route('/api/admin', adminRoutes);
 app.route('/api/users', usersRoutes);
 app.route('/api/images', imagesRoutes);
 app.route('/api/feedbacks', feedbacksRoutes);
+app.route('/api/notifications', notificationsRoutes);
 
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
@@ -174,6 +176,25 @@ app.use('*', async (c, next) => {
             FOREIGN KEY (author_uid) REFERENCES users(uid)
           )
         `).run();
+      }
+      // notifications 表（系统通知：积分变动等，导航栏铃铛入口）
+      const r6 = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('notifications')")
+        .first();
+      if (r6 && r6.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            uid TEXT NOT NULL,
+            type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            exp_delta INTEGER NOT NULL DEFAULT 0,
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (uid) REFERENCES users(uid)
+          )
+        `).run();
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_notifications_uid ON notifications(uid, is_read, created_at DESC)').run();
       }
     } catch (e) {
       console.warn('[migrate] 自动迁移失败（可忽略，可能列已存在）：', e && e.message);

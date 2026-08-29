@@ -73,7 +73,7 @@ likes.post('/toggle', requireAuth(), async (c) => {
     liked = true;
     // 积分：帖子被点赞，给帖作者 +EXP.LIKED（自己赞自己不加分）
     if (post.author_uid && post.author_uid !== uid) {
-      await addExp(db, post.author_uid, EXP.LIKED);
+      await addExp(db, post.author_uid, EXP.LIKED, 'liked', '您的帖子被点赞');
     }
   }
   const resultRow = await stmt.bind(postId).first();
