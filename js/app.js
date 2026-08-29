@@ -339,16 +339,18 @@ window.clearHomeFilters = function clearHomeFilters() {
 };
 
 // ==================== 用户搜索功能 ====================
-window.runUserSearch = async function runUserSearch() {
-  const input = document.getElementById('userSearchInput');
+// 合并搜索：q 可选传入（由 renderForum 末尾按 hash 关键字自动同步）；
+// 不传则读取右侧搜索框 sqInput 的值（与帖子关键字共用同一个输入框）
+window.runUserSearch = async function runUserSearch(q) {
+  const input = document.getElementById('sqInput');
   const results = document.getElementById('userSearchResults');
-  if (!input || !results) return;
-  const q = (input.value || '').trim();
-  if (!q) { results.innerHTML = ''; return; }
+  if (!results) return;
+  const kw = (q != null ? String(q) : (input && input.value || '')).trim();
+  if (!kw) { results.innerHTML = ''; return; }
 
   results.innerHTML = '<span class="hint">🔄 搜索中...</span>';
   try {
-    const r = await api.users.search(q);
+    const r = await api.users.search(kw);
     if (!r.success) { results.innerHTML = `<span class="hint">❌ ${escapeHtml(r.message)}</span>`; return; }
     const list = r.data || [];
     if (list.length === 0) {
@@ -365,7 +367,7 @@ window.runUserSearch = async function runUserSearch() {
 };
 
 window.clearUserSearch = function clearUserSearch() {
-  const input = document.getElementById('userSearchInput');
+  const input = document.getElementById('sqInput');
   const results = document.getElementById('userSearchResults');
   if (input) input.value = '';
   if (results) results.innerHTML = '';
@@ -838,53 +840,55 @@ async function renderForum(app) {
 
   app.innerHTML = `
     ${topBanner}
-    <!-- 搜索条（所有访客都看得到） -->
-    <div class="card search-panel">
-      <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索帖子</h3>
-      <div class="search-row">
-        <input id="sqInput" placeholder="关键字（搜标题/正文，如：数学、社团招新）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
-        <input id="stagInput" placeholder="按标签筛选（多个用逗号或 # 分隔，如：高二,羽毛球）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+    <div class="forum-layout">
+      <!-- 左侧主区：分区Tab + 帖子列表 -->
+      <div class="forum-main">
+        ${tabBarHtml}
+        <div class="card">
+          <h3 id="listTitle" style="margin-top:0;margin-bottom:10px">最新帖子</h3>
+          <div id="postList" class="empty">🔄 正在读取帖子...</div>
+        </div>
       </div>
-      <div class="search-row">
-        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
-          从 <input type="date" id="sFrom" value="${escapeHtml(filters.dateFrom)}">
-        </label>
-        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
-          到 <input type="date" id="sTo" value="${escapeHtml(filters.dateTo)}">
-        </label>
-        <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
-          排序
-          <select id="sSort" style="padding:4px 6px;border-radius:6px;border:1px solid #d2d2d7">
-            <option value="latest"   ${filters.sortBy==='latest'  ?'selected':''}>最新</option>
-            <option value="likes"    ${filters.sortBy==='likes'   ?'selected':''}>点赞最多排</option>
-            <option value="comments" ${filters.sortBy==='comments'?'selected':''}>评论最多排</option>
-            <option value="views"    ${filters.sortBy==='views'   ?'selected':''}>浏览最多排</option>
-          </select>
-        </label>
-      </div>
-      <div class="search-row" style="margin-top:6px">
-        <button onclick="homeRunSearch()">🔎 搜索</button>
-        <button class="secondary" onclick="clearHomeFilters()">🗑 清除条件</button>
-        <span id="filterBadges" style="flex:1;display:flex;flex-wrap:wrap;gap:4px;align-items:center"></span>
-      </div>
-      ${tabBarHtml}
-      <div id="popularTags">🔄 正在读取热门标签…</div>
-    </div>
 
-    <!-- 搜索用户（独立卡片，紧凑） -->
-    <div class="card search-panel" style="padding:12px 14px">
-      <h3 style="margin:0 0 8px 0;font-size:14px">👤 搜索用户</h3>
-      <div class="search-row" style="margin:0">
-        <input id="userSearchInput" placeholder="输入 UID 或昵称关键字（如 20260101、广五、数学）" onkeydown="if(event.key==='Enter')runUserSearch()">
-        <button onclick="runUserSearch()">🔎 搜用户</button>
-        <button class="secondary" onclick="clearUserSearch()">🗑 清除</button>
-      </div>
-      <div id="userSearchResults" style="margin-top:10px"></div>
-    </div>
+      <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字） -->
+      <aside class="forum-aside card search-panel">
+        <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
+        <div class="search-row">
+          <input id="sqInput" placeholder="关键字（同时搜帖子标题/正文 与 用户 UID/昵称）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+        </div>
+        <div class="search-row">
+          <input id="stagInput" placeholder="按标签筛选（多个用逗号或 # 分隔）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+        </div>
+        <div class="search-row">
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+            从 <input type="date" id="sFrom" value="${escapeHtml(filters.dateFrom)}">
+          </label>
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+            到 <input type="date" id="sTo" value="${escapeHtml(filters.dateTo)}">
+          </label>
+        </div>
+        <div class="search-row">
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+            排序
+            <select id="sSort" style="padding:4px 6px;border-radius:6px;border:1px solid #d2d2d7">
+              <option value="latest"   ${filters.sortBy==='latest'  ?'selected':''}>最新</option>
+              <option value="likes"    ${filters.sortBy==='likes'   ?'selected':''}>点赞最多排</option>
+              <option value="comments" ${filters.sortBy==='comments'?'selected':''}>评论最多排</option>
+              <option value="views"    ${filters.sortBy==='views'   ?'selected':''}>浏览最多排</option>
+            </select>
+          </label>
+        </div>
+        <div class="search-row" style="margin-top:6px">
+          <button onclick="homeRunSearch()">🔎 搜索</button>
+          <button class="secondary" onclick="clearHomeFilters()">🗑 清除条件</button>
+        </div>
+        <div id="filterBadges" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:8px"></div>
+        <div id="popularTags">🔄 正在读取热门标签…</div>
 
-    <div class="card">
-      <h3 id="listTitle" style="margin-top:0;margin-bottom:10px">最新帖子</h3>
-      <div id="postList" class="empty">🔄 正在读取帖子...</div>
+        <div style="border-top:1px dashed #e5e7eb;margin:12px 0 8px"></div>
+        <h4 style="margin:0 0 8px 0;font-size:14px">👤 匹配用户</h4>
+        <div id="userSearchResults"></div>
+      </aside>
     </div>
   `;
 
@@ -983,6 +987,9 @@ async function renderForum(app) {
   } catch (e) {
     listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
+
+  // 合并搜索：若有关键字，自动同步搜索用户（右侧板块显示匹配用户）
+  if (filters.q) runUserSearch(filters.q);
 }
 window._togglePinned = function _togglePinned() {
   const expanded = document.getElementById('pinnedExpanded');

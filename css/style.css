@@ -245,6 +245,34 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 }
 .filter-badge .chip-close:hover { opacity: 1; background: rgba(55,48,163,0.08); border-radius: 999px; }
 
+/* --------------------- 广场：左右分栏（主区 + 右侧搜索小板块） --------------------- */
+.forum-layout {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.forum-main {
+  flex: 1 1 auto;
+  min-width: 0;          /* 防止 flex 子项撑破容器 */
+}
+.forum-aside {
+  flex: 0 0 300px;
+  max-width: 320px;
+  margin-bottom: 12px;
+  border-radius: 14px;   /* 右侧小板块带圆角 */
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.forum-aside .search-row > input { flex: 1 1 100%; }
+@media (max-width: 760px) {
+  .forum-layout { flex-direction: column; }
+  .forum-aside {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    order: -1;           /* 窄屏时搜索板块移到列表上方 */
+  }
+}
+
 
 /* --------------------- 工具条 --------------------- */
 .toolbar {
