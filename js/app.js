@@ -2797,7 +2797,7 @@ async function renderMessages(app, autoPeerUid, autoPeerName) {
         <h3 id="msgTitle">请选择会话开始聊天</h3>
         <div class="msg-list" id="msgList"><div style="color:#86868b;text-align:center;padding:40px">👈 在左边选择一个会话，或发起新对话</div></div>
         <div class="msg-input" id="msgInputWrap" style="display:none">
-          <textarea id="msgInput" placeholder="按 Enter 发送，Shift+Enter 换行" onkeydown="msgBoxKeyDown(event)"></textarea>
+          <textarea id="msgInput" placeholder="按 Cmd/Ctrl + Enter 发送，Enter 换行" onkeydown="msgBoxKeyDown(event)"></textarea>
           <button onclick="sendCurrentMsg()">发送</button>
         </div>
       </div>
@@ -2961,7 +2961,8 @@ window.openConversation = async function openConversation(otherUid) {
   listEl.scrollTop = listEl.scrollHeight;
 };
 window.msgBoxKeyDown = function msgBoxKeyDown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCurrentMsg(); }
+  // Cmd (macOS) 或 Ctrl (Windows/Linux) + Enter → 发送；单独 Enter → 正常换行
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendCurrentMsg(); }
 };
 window.sendCurrentMsg = async function sendCurrentMsg() {
   const other = window._currentConvOther;
