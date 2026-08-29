@@ -255,6 +255,10 @@ function postCard(p, opts = {}) {
     ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
     : '';
   const catBadge = categoryBadgeHtml(p.category, { clickable: opts.allowClick });
+  // 可选折叠按钮（置顶帖展开后右下角，点击折回折叠行）；stopPropagation 避免触发卡片跳详情
+  const foldBtn = opts.foldId
+    ? `<button onclick="event.stopPropagation();window._foldPinned(${opts.foldId})" style="font-size:12px;padding:2px 10px;border:1px solid #d2d2d7;background:#fff;color:#6b7280;border-radius:6px;cursor:pointer">⌄ 折叠</button>`
+    : '';
   return `
     <div class="card ${clickable}" ${onclickAttr} data-post-id="${p.id}">
       <div class="meta">
@@ -266,9 +270,24 @@ function postCard(p, opts = {}) {
       <p style="white-space:pre-wrap">${escapeHtml(normalizeNewlines((p.content || '').slice(0, 140)))}${(p.content || '').length > 140 ? '…' : ''}</p>
       ${imagesHtml}
       ${tags}
-      <div class="meta" style="margin-top:8px">${stats}</div>
+      <div class="meta" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+        <span>${stats}</span>
+        ${foldBtn}
+      </div>
     </div>
   `;
+}
+
+// 置顶帖折叠行 HTML（单行标题形式，点击展开）；抽取出来供初始渲染与折回时复用
+function pinnedRowHtml(p) {
+  return `
+    <div class="card clickable" id="pinnedRow-${p.id}" onclick="window._expandPinned(${p.id})" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px" title="点击展开">
+      <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
+      ${categoryBadgeHtml(p.category)}
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
+      <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(p.authorNickname || ('用户'+p.authorUid))}</span>
+      <span style="font-size:11px;color:#9ca3af;white-space:nowrap">▸ 点击展开</span>
+    </div>`;
 }
 
 // ==================== 广场页搜索/筛选 工具函数 ====================
@@ -1031,27 +1050,22 @@ async function renderForum(app) {
     let html = '';
     if (pinnedPosts.length > 0) {
       html += `<div id="pinnedSection" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" onclick="window._togglePinned()">
-          <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
-          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;flex:1" onclick="window._togglePinned()">
+            <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+            <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+          </div>
+          <button onclick="window._foldAllPinned()" style="font-size:12px;padding:2px 10px;border:1px solid #d2d2d7;background:#fff;color:#6b7280;border-radius:6px;cursor:pointer">⌄ 全部折叠</button>
         </div>
         <div id="pinnedExpanded" style="display:none">
-          ${pinnedPosts.map(p => postCard(p, { allowClick: true })).join('')}
+          ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
         </div>
         <div id="pinnedCollapsed">
-          ${pinnedPosts.map(p => `
-            <div class="card clickable" id="pinnedRow-${p.id}" onclick="window._expandPinned(${p.id})" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px" title="点击展开">
-              <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
-              ${categoryBadgeHtml(p.category)}
-              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
-              <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(p.authorNickname || ('用户'+p.authorUid))}</span>
-              <span style="font-size:11px;color:#9ca3af;white-space:nowrap">▸ 点击展开</span>
-            </div>
-          `).join('')}
+          ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
         </div>
       </div>`;
     }
-    // 供折叠行展开使用：把置顶帖完整数据存到全局
+    // 供折叠行展开/折回使用：把置顶帖完整数据存到全局
     window._pinnedData = pinnedPosts.slice();
     html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
     listEl.outerHTML = html;
@@ -1077,13 +1091,31 @@ window._togglePinned = function _togglePinned() {
     if (hint) hint.textContent = '点击展开';
   }
 };
-// 折叠态单条置顶帖：第一次点击展开为完整卡片（postCard 已带 allowClick，再点一次即进详情页）
+// 折叠态单条置顶帖：第一次点击展开为完整卡片（带右下角折叠按钮 + allowClick 再点一次即进详情页）
 window._expandPinned = function _expandPinned(id) {
   const row = document.getElementById(`pinnedRow-${id}`);
   const data = (window._pinnedData || []).find(p => p.id === id);
   if (!row || !data) return;
-  // 用完整 postCard 替换折叠行；postCard 的 allowClick 已绑跳转详情，无需再处理
-  row.outerHTML = postCard(data, { allowClick: true });
+  row.outerHTML = postCard(data, { allowClick: true, foldId: id });
+};
+// 展开态单条置顶帖右下角"折叠"：把完整卡片折回单行标题形式
+window._foldPinned = function _foldPinned(id) {
+  const card = document.querySelector(`#pinnedSection [data-post-id="${id}"]`);
+  const data = (window._pinnedData || []).find(p => p.id === id);
+  if (!card || !data) return;
+  card.outerHTML = pinnedRowHtml(data);
+};
+// 标题行右侧"全部折叠"：隐藏整体展开区，显示折叠区并重置其中所有行（恢复被单条展开的）
+window._foldAllPinned = function _foldAllPinned() {
+  const expanded = document.getElementById('pinnedExpanded');
+  const collapsed = document.getElementById('pinnedCollapsed');
+  const hint = document.getElementById('pinnedToggleHint');
+  if (expanded) expanded.style.display = 'none';
+  if (collapsed) {
+    collapsed.style.display = '';
+    if (window._pinnedData) collapsed.innerHTML = window._pinnedData.map(pinnedRowHtml).join('');
+  }
+  if (hint) hint.textContent = '点击展开';
 };
 window.homeRunSearch = function homeRunSearch() {
   const sq = document.getElementById('sqInput');
