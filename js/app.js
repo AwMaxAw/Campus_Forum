@@ -2892,14 +2892,16 @@ async function renderMessages(app, autoPeerUid, autoPeerName) {
         authorExpPoints: c.otherExpPoints || 0,
         authorGuildId: c.otherGuildId, authorGuildName: c.otherGuildName, authorGuildIcon: c.otherGuildIcon,
       };
-      const levelHtml = levelBadge(authorObj, /*compact*/ true);
+      // 项目内没有 levelBadge 函数，统一用 api.getLevelInfo 内联生成等级徽章（同帖子卡片的写法）
+      const lvlInfo = api.getLevelInfo(c.otherExpPoints || 0, c.otherRole);
+      const levelHtml = `<span class="level-badge${lvlInfo.isAdmin ? ' admin' : ''}" style="font-size:10px;padding:1px 5px">Lv.${lvlInfo.level}</span>`;
       return `<div class="conv-item ${isPinned ? 'conv-pinned' : ''}" onclick="openConversation('${escapeHtml(c.otherUid)}')" data-uid="${escapeHtml(c.otherUid)}">
         <span class="avatar-sm" style="flex-shrink:0">${buildAvatarInner(authorObj)}</span>
         <div style="min-width:0;flex:1">
           <div class="conv-name" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
             ${pinnedTag}
             <span style="flex-shrink:0">${escapeHtml(c.otherNickname)}</span>
-            ${levelBadge(authorObj, true)}
+            ${levelHtml}
             ${guildBadge(authorObj)}
             ${roleBadgeInline(c.otherRole)}
             ${badge}
