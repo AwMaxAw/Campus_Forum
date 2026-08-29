@@ -907,9 +907,12 @@ async function renderForum(app) {
         </div>
       </div>
 
+      <!-- 右侧列：发新帖（独立框）+ 搜索面板（独立框），整体 sticky 浮动 -->
+      <div class="forum-side-col">
+        <button class="forum-newpost-btn" onclick="location.hash='post'">+ 发新帖</button>
+
       <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里；不再显示用户匹配结果） -->
       <aside class="forum-aside card search-panel">
-        <button onclick="location.hash='post'" style="width:100%;padding:8px 12px;margin-bottom:12px;font-size:14px;font-weight:600;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer">+ 发新帖</button>
         <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
         <div class="search-row">
           <input id="sqInput" placeholder="关键字（同时搜帖子标题/正文 与 用户 UID/昵称）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()" onblur="window._sqBlurRestore(this)">
@@ -946,6 +949,7 @@ async function renderForum(app) {
         ${tabBarHtml}
         <div id="popularTags">🔄 正在读取热门标签…</div>
       </aside>
+      </div>
     </div>
   `;
 
