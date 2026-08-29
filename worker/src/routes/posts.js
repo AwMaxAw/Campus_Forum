@@ -87,7 +87,7 @@ posts.get('/', async (c) => {
     const tag = (searchParams.get('tag') || '').trim();     // 单标签：匹配是否包含在 tags 逗号串里
     const dateFrom = (searchParams.get('date_from') || '').trim(); // YYYY-MM-DD
     const dateTo = (searchParams.get('date_to') || '').trim();     // YYYY-MM-DD
-    const sortBy = searchParams.get('sort_by') || 'latest'; // latest | hot
+    const sortBy = searchParams.get('sort_by') || 'latest'; // latest | likes | comments | views
     const author = (searchParams.get('author') || '').trim(); // 按作者 UID 过滤（用户主页用）
     const offset = (page - 1) * pageSize;
 
@@ -132,9 +132,12 @@ posts.get('/', async (c) => {
       .first();
     const total = countResult.c;
 
-    const orderSQL = sortBy === 'hot'
-      ? 'p.is_pinned DESC, p.pin_order ASC, (p.like_count * 3 + p.comment_count * 2 + p.view_count) DESC, p.created_at DESC'
-      : 'p.is_pinned DESC, p.pin_order ASC, p.created_at DESC';
+    const sortMap = {
+      likes:    'p.is_pinned DESC, p.pin_order ASC, p.like_count DESC, p.created_at DESC',
+      comments: 'p.is_pinned DESC, p.pin_order ASC, p.comment_count DESC, p.created_at DESC',
+      views:    'p.is_pinned DESC, p.pin_order ASC, p.view_count DESC, p.created_at DESC',
+    };
+    const orderSQL = sortMap[sortBy] || 'p.is_pinned DESC, p.pin_order ASC, p.created_at DESC';
 
     const rows = await db
       .prepare(

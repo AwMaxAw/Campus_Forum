@@ -775,8 +775,10 @@ async function renderForum(app) {
         <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
           排序
           <select id="sSort" style="padding:4px 6px;border-radius:6px;border:1px solid #d2d2d7">
-            <option value="latest" ${filters.sortBy==='latest'?'selected':''}>最新</option>
-            <option value="hot"    ${filters.sortBy==='hot'   ?'selected':''}>最热（点赞×3 + 评论×2 + 浏览）</option>
+            <option value="latest"   ${filters.sortBy==='latest'  ?'selected':''}>最新</option>
+            <option value="likes"    ${filters.sortBy==='likes'   ?'selected':''}>点赞最多排</option>
+            <option value="comments" ${filters.sortBy==='comments'?'selected':''}>评论最多排</option>
+            <option value="views"    ${filters.sortBy==='views'   ?'selected':''}>浏览最多排</option>
           </select>
         </label>
       </div>
@@ -847,7 +849,8 @@ async function renderForum(app) {
     const hasFilter = applied.category || applied.q || applied.tag || applied.dateFrom || applied.dateTo;
     const catLabelForTitle = applied.category ? (CATEGORY_LABEL[applied.category] || applied.category) : null;
     const prefix = catLabelForTitle ? `「${catLabelForTitle}」` : '';
-    if (listTitleEl) listTitleEl.textContent = hasFilter ? `${prefix}${prefix ? ' ' : ''}搜索结果（${total} 条）` : (applied.sortBy==='hot' ? '🔥 最热帖子' : '最新帖子');
+    const sortTitles = { latest: '最新帖子', likes: '🔥 点赞最多排', comments: '💬 评论最多排', views: '👁 浏览最多排' };
+    if (listTitleEl) listTitleEl.textContent = hasFilter ? `${prefix}${prefix ? ' ' : ''}搜索结果（${total} 条）` : (sortTitles[applied.sortBy] || '最新帖子');
 
     // 条件徽章（category / q / tag / 日期区间，点 × 清掉单个）
     const badgeBox = document.getElementById('filterBadges');

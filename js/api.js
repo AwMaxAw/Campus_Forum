@@ -311,7 +311,7 @@ export const posts = {
     if (f.author) qs.set('author', f.author);       // 按作者 UID 过滤（用户主页用）
     if (f.dateFrom) qs.set('date_from', f.dateFrom); // YYYY-MM-DD
     if (f.dateTo)   qs.set('date_to', f.dateTo);
-    if (f.sortBy)   qs.set('sort_by', f.sortBy);     // 'latest' | 'hot'
+    if (f.sortBy)   qs.set('sort_by', f.sortBy);     // 'latest' | 'likes' | 'comments' | 'views'
     return request(`/api/posts?${qs}`, { needsAuth: false });
   },
   /** 热门标签榜（首页搜索条 chip 推荐用） */
