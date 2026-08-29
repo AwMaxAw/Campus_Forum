@@ -318,6 +318,10 @@ export const posts = {
   async popularTags() {
     return request('/api/posts/tags/popular', { needsAuth: false });
   },
+  /** 按月份获取帖子日历数据 */
+  async calendar(year, month) {
+    return request(`/api/posts/calendar?year=${year}&month=${month}`, { needsAuth: false });
+  },
   async byId(id) {
     return request(`/api/posts/${id}`, { needsAuth: false });
   },

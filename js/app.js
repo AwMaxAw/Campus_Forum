@@ -183,6 +183,7 @@ function renderDrawer(loggedIn, me, unreadMsg) {
     ? [
         { label: '首页',     icon: '🏠', hash: 'home' },
         { label: '广场',     icon: '📢', hash: 'forum' },
+        { label: '日历',     icon: '📅', hash: 'calendar' },
         { label: '我的',     icon: '👤', hash: 'me' },
         { label: '公告',     icon: '📋', hash: 'announcements' },
         { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
@@ -192,6 +193,7 @@ function renderDrawer(loggedIn, me, unreadMsg) {
       ]
     : [
         { label: '首页',     icon: '🏠', hash: 'home' },
+        { label: '日历',     icon: '📅', hash: 'calendar' },
         { label: '公告',     icon: '📋', hash: 'announcements' },
         { label: 'FAQ',      icon: '❓', hash: 'faq' },
         { label: '关于本站', icon: 'ℹ️', hash: 'about' },
@@ -568,6 +570,84 @@ function renderFaq(app) {
       <p style="margin:0;color:#6b7280">还有其他问题？欢迎 <a href="#messages" style="color:#2563eb">私信管理员</a> 或查看 <a href="#about" style="color:#2563eb">关于本站</a>。</p>
     </div>
   `;
+}
+
+// ==================== 视图：日历 ====================
+let _calYear, _calMonth;
+async function renderCalendar(app) {
+  const now = new Date();
+  if (!_calYear) _calYear = now.getFullYear();
+  if (!_calMonth) _calMonth = now.getMonth() + 1;
+
+  const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+  const weekDays = ['周一','周二','周三','周四','周五','周六','周日'];
+
+  app.innerHTML = `
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <button class="secondary" id="calPrev" style="padding:4px 12px">‹ 上月</button>
+        <span style="font-size:18px;font-weight:600">${_calYear} 年 ${monthNames[_calMonth - 1]}</span>
+        <button class="secondary" id="calNext" style="padding:4px 12px">下月 ›</button>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:4px">
+        ${weekDays.map(d => `<div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:#6b7280;padding:4px 0;background:#f9fafb;border-radius:4px">${d}</div>`).join('')}
+      </div>
+      <div id="calGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">🔄 加载中...</div>
+    </div>
+  `;
+
+  document.getElementById('calPrev').onclick = () => {
+    _calMonth--;
+    if (_calMonth < 1) { _calMonth = 12; _calYear--; }
+    renderCalendar(app);
+  };
+  document.getElementById('calNext').onclick = () => {
+    _calMonth++;
+    if (_calMonth > 12) { _calMonth = 1; _calYear++; }
+    renderCalendar(app);
+  };
+
+  const grid = document.getElementById('calGrid');
+  try {
+    const res = await api.posts.calendar(_calYear, _calMonth);
+    if (!res.success) { grid.textContent = `❌ ${res.message}`; return; }
+    const byDay = res.data || {};
+
+    // 计算日历格数
+    const firstDay = new Date(_calYear, _calMonth - 1, 1);
+    const lastDay = new Date(_calYear, _calMonth, 0);
+    const startWeekday = (firstDay.getDay() + 6) % 7; // 周一=0
+    const daysInMonth = lastDay.getDate();
+    const today = new Date();
+    const isCurrentMonth = today.getFullYear() === _calYear && today.getMonth() + 1 === _calMonth;
+    const todayDate = today.getDate();
+
+    let cells = [];
+    // 前面空格
+    for (let i = 0; i < startWeekday; i++) {
+      cells.push('<div style="background:#f9fafb;border-radius:6px;min-height:90px"></div>');
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const posts = byDay[d] || [];
+      const isToday = isCurrentMonth && d === todayDate;
+      const dayStyle = isToday
+        ? 'background:#eff6ff;border:2px solid #3b82f6;border-radius:6px;min-height:90px;padding:4px;display:flex;flex-direction:column'
+        : posts.length
+          ? 'background:#fff;border:1px solid #e5e7eb;border-radius:6px;min-height:90px;padding:4px;display:flex;flex-direction:column'
+          : 'background:#f9fafb;border-radius:6px;min-height:90px;padding:4px;display:flex;flex-direction:column';
+      const dayHeader = `<div style="font-size:11px;font-weight:600;color:${isToday ? '#3b82f6' : '#9ca3af'};margin-bottom:2px;text-align:right">${d}</div>`;
+      const postsHtml = posts.length
+        ? `<div style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:2px">
+            ${posts.map(p => `<a href="#detail/${p.id}" style="font-size:11px;line-height:1.3;color:#374151;text-decoration:none;padding:2px 4px;background:#f3f4f6;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(p.title)}">${categoryBadgeHtml(p.category)}${escapeHtml(p.title)}</a>`).join('')}
+          </div>`
+        : '';
+      cells.push(`<div style="${dayStyle}">${dayHeader}${postsHtml}</div>`);
+    }
+
+    grid.innerHTML = cells.join('');
+  } catch (e) {
+    grid.textContent = `❌ 网络错误：${e.message}`;
+  }
 }
 
 // ==================== 反馈悬浮球 ====================
@@ -2814,6 +2894,7 @@ function route() {
   }
   else if (path === 'announcements') renderAnnouncements(app);
   else if (path === 'faq') renderFaq(app);
+  else if (path === 'calendar') renderCalendar(app);
   else if (path === 'about') renderAbout(app);
   else if (path === 'admin') renderAdmin(app);
   else if (path === 'forum') renderForum(app);

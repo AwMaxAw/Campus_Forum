@@ -160,6 +160,53 @@ posts.get('/', async (c) => {
   }
 });
 
+// ==================== 按月份获取帖子日历数据 ====================
+// GET /api/posts/calendar?year=2026&month=8
+// 返回该月每天有帖子发过的日期 + 帖子标题列表（不含隐藏帖）
+posts.get('/calendar', async (c) => {
+  try {
+    const year = parseInt(c.req.query('year'), 10);
+    const month = parseInt(c.req.query('month'), 10);
+    if (!year || !month || month < 1 || month > 12) {
+      return fail('请提供有效的 year 和 month 参数');
+    }
+    const db = c.env.DB;
+    // D1 的 datetime('now') 存的是 UTC，substr 取前 7 位得到 "YYYY-MM"
+    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+    const rows = await db
+      .prepare(
+        `SELECT p.id, p.title, p.author_uid, p.category, p.created_at,
+                u.nickname AS author_nickname
+         FROM posts p
+         LEFT JOIN users u ON u.uid = p.author_uid
+         WHERE p.is_hidden = 0 AND substr(p.created_at, 1, 7) = ?
+         ORDER BY p.created_at ASC`
+      )
+      .bind(monthPrefix)
+      .all();
+    // 按日期分组
+    const byDay = {};
+    for (const r of rows.results || []) {
+      // created_at 格式 "YYYY-MM-DD HH:MM:SS"，取日部分
+      const day = (r.created_at || '').slice(8, 10);
+      if (!day) continue;
+      const dayKey = parseInt(day, 10);
+      if (!byDay[dayKey]) byDay[dayKey] = [];
+      byDay[dayKey].push({
+        id: r.id,
+        title: r.title,
+        authorUid: r.author_uid,
+        authorNickname: r.author_nickname || `用户${r.author_uid}`,
+        category: r.category,
+        createdAt: r.created_at,
+      });
+    }
+    return c.json(ok(byDay, { year, month, total: (rows.results || []).length }));
+  } catch (e) {
+    return fail(`[posts calendar] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 // ==================== 热门标签榜（用于首页搜索条 chip 推荐）====================
 posts.get('/tags/popular', async (c) => {
   try {
