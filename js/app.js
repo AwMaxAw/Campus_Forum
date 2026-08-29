@@ -338,6 +338,17 @@ window.clearHomeFilters = function clearHomeFilters() {
   setTimeout(route, 0);
 };
 
+// 搜索框失焦自动恢复：若搜索框已清空且 URL 里还残留 q 筛选，
+// 则自动清掉关键字筛选并刷新回初始帖子展示状态（无需再点搜索按钮）
+window._sqBlurRestore = function _sqBlurRestore(input) {
+  const val = (input && input.value || '').trim();
+  if (val) return;                              // 搜索框有内容 → 不动，交给"搜索"按钮
+  const hash = location.hash || '';
+  if (!hash.includes('q=') && !hash.includes('q%3D')) return; // 本来就没 q 筛选 → 无需恢复
+  // 清掉 q 筛选（保留其他分区/标签/日期/排序筛选），刷新
+  setHomeFilter('q', '');
+};
+
 // ==================== 用户搜索功能 ====================
 // 合并搜索：q 可选传入；不传则读取搜索框 sqInput。
 // 渲染目标：左侧主区的 #userBlock（卡片样式包裹，顶部小标题+结果列表）
@@ -882,7 +893,7 @@ async function renderForum(app) {
       <aside class="forum-aside card search-panel">
         <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
         <div class="search-row">
-          <input id="sqInput" placeholder="关键字（同时搜帖子标题/正文 与 用户 UID/昵称）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+          <input id="sqInput" placeholder="关键字（同时搜帖子标题/正文 与 用户 UID/昵称）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()" onblur="window._sqBlurRestore(this)">
         </div>
         <div class="search-row">
           <input id="stagInput" placeholder="按标签筛选（多个用逗号或 # 分隔）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
