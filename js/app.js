@@ -203,6 +203,11 @@ async function renderTopBar() {
     } catch {}
   }
 
+  // 若 me 是旧登录态（还没有 guildName 字段），调用 /me 刷新一次用户缓存（api.auth.me 内部会更新 userCache + localStorage）
+  if (loggedIn && me && me.guildName === undefined && me.guildId === undefined) {
+    try { await api.auth.me(); } catch {}
+  }
+
   if (loggedIn && me) {
     const roleBadge = me.role === 'ops_admin'
       ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
@@ -237,7 +242,7 @@ async function renderTopBar() {
           ${levelBadge}
           ${regionEl}
           <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
-          <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
+          <span class="user-nickname">${roleBadge}${guildBadge(me)}${escapeHtml(me.nickname)}</span>
         </span>
         ${bellHtml}
         <button class="secondary" onclick="doLogout()">退出</button>

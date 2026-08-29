@@ -84,7 +84,7 @@ auth.post('/register', async (c) => {
     .bind(uid)
     .first();
 
-  return c.json(ok(serializeUser(row)), 201);
+  return c.json(ok(await serializeUser(row, db)), 201);
 });
 
 // ==================== 登录 ====================
@@ -136,7 +136,7 @@ auth.post('/login', async (c) => {
       console.warn('[login] 更新 last_login_at 失败（可忽略）：', e && e.message);
     }
 
-    return c.json(ok(serializeUser(user), {
+    return c.json(ok(await serializeUser(user, db), {
       token,
       tokenExpiresAt: new Date((now + JWT_TTL_SEC) * 1000).toISOString(),
     }));
@@ -187,7 +187,7 @@ auth.post('/quick-login', async (c) => {
       await db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE uid = ?").bind(user.uid).run();
     } catch {}
 
-    return c.json(ok(serializeUser(user), {
+    return c.json(ok(await serializeUser(user, db), {
       token,
       tokenExpiresAt: new Date((now + JWT_TTL_SEC) * 1000).toISOString(),
     }));
@@ -201,14 +201,14 @@ auth.get('/me', requireAuth(), async (c) => {
   try {
     const payload = c.get('jwtPayload');
     if (!payload || !payload.sub) return fail('无效的 token', 401);
-
-    const user = await c.env.DB
+    const db = c.env.DB;
+    const user = await db
       .prepare('SELECT * FROM users WHERE uid = ?')
       .bind(payload.sub)
       .first();
 
     if (!user) return fail('用户不存在', 401);
-    return c.json(ok(serializeUser(user)));
+    return c.json(ok(await serializeUser(user, db)));
   } catch (e) {
     return fail(`[me] ${e.name}: ${e.message}`, 500);
   }
@@ -299,7 +299,7 @@ auth.put('/me/profile', requireAuth(), async (c) => {
     const db = c.env.DB;
     await db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE uid = ?`).bind(...vals).run();
     const row = await db.prepare('SELECT * FROM users WHERE uid = ?').bind(uid).first();
-    return c.json(ok(serializeUser(row), { updatedAt: row && row.updated_at }));
+    return c.json(ok(await serializeUser(row, db), { updatedAt: row && row.updated_at }));
   } catch (e) {
     return fail(`[update profile] ${e.name}: ${e.message}`, 500);
   }

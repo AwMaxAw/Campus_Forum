@@ -109,9 +109,10 @@ export function isUidValid(uid) {
 }
 
 // ==================== 用户序列化（返回给前端的用户对象） ====================
-export function serializeUser(row) {
+// 若传入 db 会额外关联查当前公会信息（nav 登录/注册/快速登录/更新资料 全部路径自动生效）
+export async function serializeUser(row, db) {
   if (!row) return null;
-  return {
+  const base = {
     uid: row.uid,
     nickname: row.nickname,
     role: row.role,
@@ -120,7 +121,29 @@ export function serializeUser(row) {
     expPoints: typeof row.exp_points === 'number' ? row.exp_points : Number(row.exp_points || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at || null,
+    guildId: null,
+    guildName: null,
+    guildIcon: null,
   };
+  if (db && row.uid) {
+    try {
+      const g = await db
+        .prepare(
+          `SELECT gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
+           FROM guild_members gm
+           JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
+           WHERE gm.uid = ? LIMIT 1`
+        )
+        .bind(row.uid)
+        .first();
+      if (g) {
+        base.guildId = g.guild_id || null;
+        base.guildName = g.guild_name || null;
+        base.guildIcon = g.guild_icon || null;
+      }
+    } catch {}
+  }
+  return base;
 }
 
 // ==================== JWT 辅助：手动 + Hono sign 都行 ====================
