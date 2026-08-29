@@ -115,6 +115,27 @@ app.use('*', async (c, next) => {
       if (r3 && r3.c === 0) {
         await c.env.DB.prepare('ALTER TABLE users ADD COLUMN last_login_at TEXT').run();
       }
+      // users.exp_points（等级积分系统：累计积分）
+      const rExp = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='exp_points'")
+        .first();
+      if (rExp && rExp.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE users ADD COLUMN exp_points INTEGER NOT NULL DEFAULT 0').run();
+      }
+      // users.exp_daily_date（浏览积分发放日期，跨天重置）
+      const rExpDate = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='exp_daily_date'")
+        .first();
+      if (rExpDate && rExpDate.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE users ADD COLUMN exp_daily_date TEXT').run();
+      }
+      // users.exp_daily_browse（当日已发放浏览积分）
+      const rExpBrowse = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('users') WHERE name='exp_daily_browse'")
+        .first();
+      if (rExpBrowse && rExpBrowse.c === 0) {
+        await c.env.DB.prepare('ALTER TABLE users ADD COLUMN exp_daily_browse INTEGER NOT NULL DEFAULT 0').run();
+      }
       // images 表（若不存在则创建）
       const r4 = await c.env.DB
         .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('images')")

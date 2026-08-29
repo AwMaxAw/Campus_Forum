@@ -117,6 +117,7 @@ export function serializeUser(row) {
     role: row.role,
     avatarUrl: row.avatar_url || null,
     bio: row.bio || null,
+    expPoints: typeof row.exp_points === 'number' ? row.exp_points : Number(row.exp_points || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at || null,
   };

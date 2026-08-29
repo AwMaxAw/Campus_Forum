@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260828-user-search';
+import * as api from './api.js?v=20260829-exp';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -202,9 +202,13 @@ async function renderTopBar() {
       ${myPrefix ? '' : `<option value=""${selectedValue === '' ? ' selected' : ''}>全部区域</option>`}
       ${REGIONS.map(r => `<option value="${r.prefix}"${selectedValue === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
     </select>${otherBadge}`;
+    // 等级徽标：依据累计积分算等级，点击进积分页（expPoints 可能旧缓存为空，兜底 0）
+    const _li = api.getLevelInfo(Number(me.expPoints || 0));
+    const levelBadge = `<a href="#exp" class="nav-level" onclick="event.stopPropagation()" title="等级 Lv.${_li.level} ${_li.title}｜累计积分 ${_li.exp}（点开看详情）">Lv.${_li.level}</a>`;
     nav.innerHTML = `
       <span class="nav-right-group">
         <span class="nav-user" title="我的主页" onclick="location.hash='me'">
+          ${levelBadge}
           ${regionEl}
           <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
           <span class="user-nickname">${roleBadge}${escapeHtml(me.nickname)}</span>
@@ -234,6 +238,7 @@ function renderDrawer(loggedIn, me, unreadMsg) {
         { label: '广场',     icon: '📢', hash: 'forum' },
         { label: '日历',     icon: '📅', hash: 'calendar' },
         { label: '我的',     icon: '👤', hash: 'me' },
+        { label: '积分',     icon: '🏆', hash: 'exp' },
         { label: '公告',     icon: '📋', hash: 'announcements' },
         { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
         { label: 'FAQ',      icon: '❓', hash: 'faq' },
@@ -1925,6 +1930,93 @@ function refreshMyProfileDisplay() {
   if (typeof renderTopBar === 'function') renderTopBar();
 }
 
+// ==================== 视图：积分等级页（进度条 + 行为积分规则 + 等级表）====================
+async function renderExp(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+
+  app.innerHTML = `<div class="empty">🔄 正在读取积分...</div>`;
+
+  // 拉最新积分：发帖/评论/被赞后积分会变，本地缓存可能过期，强制刷新
+  let expPoints = 0;
+  try {
+    const r = await api.auth.me();
+    if (r && r.success && r.data) expPoints = Number(r.data.expPoints || 0);
+  } catch {}
+
+  const info = api.getLevelInfo(expPoints);
+  const pct = Math.round(info.progress * 100);
+
+  // 取 Lv.N 起点所需积分（表内查表，超出表按每级 +1000 递推）
+  const levelStart = (lv) => {
+    if (lv <= api.LEVEL_THRESHOLDS.length) return api.LEVEL_THRESHOLDS[lv - 1];
+    const last = api.LEVEL_THRESHOLDS[api.LEVEL_THRESHOLDS.length - 1];
+    return last + 1000 * (lv - api.LEVEL_THRESHOLDS.length);
+  };
+
+  // 等级表前 15 行，标注当前等级
+  const levelRows = [];
+  for (let lv = 1; lv <= 15; lv++) {
+    const base = levelStart(lv);
+    const nextBase = levelStart(lv + 1);
+    const title = api.LEVEL_TITLES[Math.min(lv - 1, api.LEVEL_TITLES.length - 1)] || '';
+    const isCur = lv === info.level;
+    levelRows.push(`<tr class="${isCur ? 'exp-cur-level' : ''}">
+      <td>Lv.${lv}</td><td>${base}</td><td>${nextBase}</td>
+      <td>${escapeHtml(title)}</td><td>${isCur ? '← 当前' : ''}</td>
+    </tr>`);
+  }
+
+  // 行为积分规则
+  const rules = [
+    ['📝 发帖', `+${api.EXP.POST} 积分`],
+    ['💬 评论', `+${api.EXP.COMMENT} 积分`],
+    ['❤️ 帖子被点赞', `+${api.EXP.LIKED} 积分（加给帖作者，自己赞自己不加分）`],
+    ['↩️ 评论被回复', `+${api.EXP.REPLIED} 积分（加给被回复者）`],
+    ['👀 浏览帖子', `+${api.EXP.BROWSE} 积分/帖，每日上限 ${api.EXP.BROWSE_DAILY_LIMIT} 积分`],
+  ];
+
+  app.innerHTML = `
+    <div class="card exp-hero">
+      <div class="exp-level-row">
+        <div class="exp-level-badge">Lv.${info.level}</div>
+        <div class="exp-level-meta">
+          <div class="exp-level-title">${escapeHtml(info.title)}</div>
+          <div class="exp-points">累计积分 <b>${info.exp}</b></div>
+        </div>
+      </div>
+      <div class="exp-progress-wrap">
+        <div class="exp-progress-bar"><div class="exp-progress-fill" style="width:${pct}%"></div></div>
+        <div class="exp-progress-text">
+          <span>当前 Lv.${info.level}（起点 ${info.currentBase} 分）</span>
+          <span>距下一级还差 <b>${info.toNext}</b> 分 → Lv.${info.level + 1}（${info.nextBase} 分）</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">⚡ 行为积分规则</h3>
+      <ul class="exp-rules">
+        ${rules.map(([k, v]) => `<li><span class="exp-rule-key">${k}</span><span class="exp-rule-val">${escapeHtml(v)}</span></li>`).join('')}
+      </ul>
+      <p class="hint">积分只增不减（删除帖子/评论不会扣分）。浏览积分每日 0 点（UTC）重置计数。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">🏆 等级积分表</h3>
+      <table class="exp-table">
+        <thead><tr><th>等级</th><th>所需积分</th><th>下一级</th><th>头衔</th><th></th></tr></thead>
+        <tbody>${levelRows.join('')}</tbody>
+      </table>
+      <p class="hint">超过 Lv.10 后每级 +1000 积分递增。</p>
+    </div>
+
+    <div class="toolbar">
+      <button class="secondary" onclick="location.hash='forum'">去广场发帖赚积分 →</button>
+      <button class="ghost" onclick="location.hash='me'">返回我的</button>
+    </div>
+  `;
+}
+
 async function renderMe(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
   _pendingAvatarSrc = null;   // 重新进入「我的」时 KV 早已同步，回退到正式取图 URL
@@ -3083,6 +3175,7 @@ function route() {
   else if (path === 'post') renderPost(app);
   else if (path === 'detail' && seg2) renderDetail(app, parseInt(seg2, 10));
   else if (path === 'me') renderMe(app);
+  else if (path === 'exp') renderExp(app);
   else if (path === 'user' && seg2) renderUserProfile(app, seg2);
   else if (path === 'messages') {
     // 解析查询参数：messages?peer=UID&name=昵称

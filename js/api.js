@@ -37,6 +37,62 @@ export function isCategoryAdminOnly(key) {
   return !!categoryMeta(key).adminOnly;
 }
 
+// ======================== 等级积分系统（前端常量 + 计算，必须与 worker/src/utils/exp.js 一致）========================
+// 累计积分 → 升级阈值；Lv1=0 起，Lv10=4500；超过表内最高按每级 +1000 递增
+export const LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500];
+// 等级头衔（展示用）
+export const LEVEL_TITLES = ['新手', '学徒', '常客', '熟手', '达人', '专家', '导师', '元老', '宗师', '传说'];
+// 行为积分（加分点，与后端 EXP 一致；仅作展示/说明用）
+export const EXP = {
+  POST: 5,                // 发帖
+  COMMENT: 2,             // 评论
+  LIKED: 3,               // 帖子被点赞（给帖作者）
+  REPLIED: 1,             // 评论被他人回复（给被回复者）
+  BROWSE: 1,              // 浏览帖子
+  BROWSE_DAILY_LIMIT: 10, // 每日浏览积分上限
+};
+
+/**
+ * 依据累计积分算等级信息（前端展示用，逻辑与后端 getLevelInfo 一致）。
+ * @param {number} expRaw
+ * @returns {{level:number,currentBase:number,nextBase:number,exp:number,progress:number,toNext:number,title:string}}
+ */
+export function getLevelInfo(expRaw) {
+  const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
+  const lastIdx = LEVEL_THRESHOLDS.length - 1;
+  const lastThreshold = LEVEL_THRESHOLDS[lastIdx];
+
+  let level = 1;
+  let currentBase = 0;
+  let nextBase = LEVEL_THRESHOLDS[1] ?? LEVEL_THRESHOLDS[0] + 1000;
+
+  if (exp < lastThreshold) {
+    for (let i = 0; i < LEVEL_THRESHOLDS.length; i++) {
+      if (exp >= LEVEL_THRESHOLDS[i]) {
+        level = i + 1;
+        currentBase = LEVEL_THRESHOLDS[i];
+        nextBase = i + 1 < LEVEL_THRESHOLDS.length ? LEVEL_THRESHOLDS[i + 1] : LEVEL_THRESHOLDS[i] + 1000;
+      } else {
+        break;
+      }
+    }
+  } else {
+    level = LEVEL_THRESHOLDS.length;
+    currentBase = lastThreshold;
+    while (exp >= currentBase + 1000) {
+      currentBase += 1000;
+      level += 1;
+    }
+    nextBase = currentBase + 1000;
+  }
+
+  const progress = nextBase > currentBase
+    ? Math.max(0, Math.min(1, (exp - currentBase) / (nextBase - currentBase)))
+    : 1;
+  const title = LEVEL_TITLES[Math.min(level - 1, LEVEL_TITLES.length - 1)] || `Lv.${level}`;
+  return { level, currentBase, nextBase, exp, progress, toNext: Math.max(0, nextBase - exp), title };
+}
+
 const TOKEN_KEY = 'campus_forum_token';
 const USER_KEY = 'campus_forum_user';
 

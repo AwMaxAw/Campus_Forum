@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS users (
   bio TEXT,                                -- 简介
   is_banned INTEGER NOT NULL DEFAULT 0,    -- 0/1，是否被管理员封禁（封禁后无法登录）
   last_login_at TEXT,                       -- 上次最后登录时间（登录成功时更新；为兼容 D1 ADD COLUMN，不带 NOT NULL）
+  exp_points INTEGER NOT NULL DEFAULT 0,    -- 累计积分（等级积分系统，只增不减）
+  exp_daily_date TEXT,                       -- 最近一次浏览积分发放日期 YYYY-MM-DD（跨天重置 exp_daily_browse；ADD COLUMN 兼容不带 NOT NULL）
+  exp_daily_browse INTEGER NOT NULL DEFAULT 0,-- 当日已发放的浏览积分（防刷，每日上限 10）
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT                          -- 最后修改时间（改密码 / 改资料时更新；为兼容 D1 ADD COLUMN，不带 NOT NULL 与不稳定 DEFAULT）
 );

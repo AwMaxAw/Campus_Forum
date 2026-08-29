@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
 import { createMiddleware } from 'hono/factory';
+import { EXP, addExp, addBrowseExp } from '../utils/exp.js';
 
 const posts = new Hono();
 
@@ -293,6 +294,8 @@ posts.get('/:id', async (c) => {
     const favRow = await db.prepare('SELECT 1 FROM favorites WHERE uid = ? AND post_id = ?').bind(uid, id).first();
     isLiked = !!likeRow;
     isFavorited = !!favRow;
+    // 浏览积分：已登录用户每打开帖子 +1（每日上限 10，跨天重置，见 utils/exp.js addBrowseExp）
+    await addBrowseExp(db, uid);
   }
 
   const result = mapPostRow({ ...row, is_liked: isLiked, is_favorited: isFavorited });
@@ -384,6 +387,9 @@ posts.post('/', requireAuth(), async (c) => {
     const postId = result && result.meta && typeof result.meta.last_row_id === 'number'
       ? result.meta.last_row_id : null;
     if (!postId) return fail('帖子创建失败（DB 返回空 id）', 500);
+
+    // 发帖积分：作者 +EXP.POST（失败不阻塞主流程）
+    await addExp(db, uid, EXP.POST);
 
     const created = await db
       .prepare(

@@ -12,6 +12,7 @@
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
 import { createMiddleware } from 'hono/factory';
+import { EXP, addExp } from '../utils/exp.js';
 
 const likes = new Hono();
 
@@ -49,8 +50,8 @@ likes.post('/toggle', requireAuth(), async (c) => {
 
   const db = c.env.DB;
 
-  // 帖子存在？
-  const post = await db.prepare('SELECT id, is_hidden FROM posts WHERE id = ?').bind(postId).first();
+  // 帖子存在？（顺便取作者 UID，用于"帖子被点赞 +3"积分）
+  const post = await db.prepare('SELECT id, is_hidden, author_uid FROM posts WHERE id = ?').bind(postId).first();
   if (!post || post.is_hidden) return fail('帖子不存在或已被删除', 404);
 
   const existing = await db
@@ -70,6 +71,10 @@ likes.post('/toggle', requireAuth(), async (c) => {
     await db.prepare('INSERT OR IGNORE INTO post_likes (uid, post_id) VALUES (?, ?)').bind(uid, postId).run();
     stmt = db.prepare('UPDATE posts SET like_count = like_count + 1 WHERE id = ? RETURNING like_count');
     liked = true;
+    // 积分：帖子被点赞，给帖作者 +EXP.LIKED（自己赞自己不加分）
+    if (post.author_uid && post.author_uid !== uid) {
+      await addExp(db, post.author_uid, EXP.LIKED);
+    }
   }
   const resultRow = await stmt.bind(postId).first();
   const likeCount = resultRow ? resultRow.like_count : 0;

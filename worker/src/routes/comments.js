@@ -14,6 +14,7 @@
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
 import { createMiddleware } from 'hono/factory';
+import { EXP, addExp } from '../utils/exp.js';
 
 const comments = new Hono();
 
@@ -99,13 +100,15 @@ comments.post('/', requireAuth(), async (c) => {
   const post = await db.prepare('SELECT id, is_hidden FROM posts WHERE id = ?').bind(postId).first();
   if (!post || post.is_hidden) return fail('帖子不存在或已被删除', 404);
 
-  // 2) 如回复某条评论：reply_to_id 存在且确实是同帖下的
+  // 2) 如回复某条评论：reply_to_id 存在且确实是同帖下的（顺便取被回复评论作者，用于"被回复 +1"积分）
   let replyToOk = true;
+  let repliedAuthorUid = null;
   if (replyToId) {
     if (!Number.isFinite(replyToId) || replyToId <= 0) replyToOk = false;
     else {
-      const parent = await db.prepare('SELECT id, post_id FROM comments WHERE id = ?').bind(replyToId).first();
+      const parent = await db.prepare('SELECT id, post_id, author_uid FROM comments WHERE id = ?').bind(replyToId).first();
       if (!parent || parent.post_id !== postId) replyToOk = false;
+      else repliedAuthorUid = parent.author_uid;
     }
     if (!replyToOk) return fail('要回复的评论不存在', 404);
   }
@@ -120,7 +123,13 @@ comments.post('/', requireAuth(), async (c) => {
   // 4) 帖子评论数 +1（D1 不支持触发器，手动 UPDATE）
   await db.prepare('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?').bind(postId).run();
 
-  // 5) 返回完整对象
+  // 5) 积分：评论者 +EXP.COMMENT；若回复了他人评论，被回复者 +EXP.REPLIED（自己回复自己不加分）
+  await addExp(db, uid, EXP.COMMENT);
+  if (repliedAuthorUid && repliedAuthorUid !== uid) {
+    await addExp(db, repliedAuthorUid, EXP.REPLIED);
+  }
+
+  // 6) 返回完整对象
   const created = await db
     .prepare(
       `SELECT c.*,
