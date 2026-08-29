@@ -104,7 +104,7 @@ a:hover { text-decoration: underline; }
 
 /* --------------------- 容器 --------------------- */
 #app {
-  max-width: 880px;
+  max-width: 1000px;
   margin: 20px auto;
   padding: 0 16px;
 }
@@ -248,7 +248,7 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 /* --------------------- 广场：左右分栏（主区 + 右侧列） --------------------- */
 .forum-layout {
   display: flex;
-  gap: 20px;               /* 主区与右侧列间距 */
+  gap: 32px;               /* 主区与右侧列间距拉大，搜索部分更靠右 */
   align-items: flex-start;
 }
 .forum-main {
