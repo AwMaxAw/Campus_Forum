@@ -1959,11 +1959,11 @@ async function renderExp(app) {
   const info = api.getLevelInfo(expPoints);
   const pct = Math.round(info.progress * 100);
 
-  // 取 Lv.N 起点所需积分（表内查表，超出表按每级 +1000 递推）
+  // 取 Lv.N 起点所需积分（表内查表，超出表按 LEVEL_STEP_BEYOND 递推）
   const levelStart = (lv) => {
     if (lv <= api.LEVEL_THRESHOLDS.length) return api.LEVEL_THRESHOLDS[lv - 1];
     const last = api.LEVEL_THRESHOLDS[api.LEVEL_THRESHOLDS.length - 1];
-    return last + 1000 * (lv - api.LEVEL_THRESHOLDS.length);
+    return last + api.LEVEL_STEP_BEYOND * (lv - api.LEVEL_THRESHOLDS.length);
   };
 
   // 等级表前 15 行，标注当前等级
@@ -1971,11 +1971,9 @@ async function renderExp(app) {
   for (let lv = 1; lv <= 15; lv++) {
     const base = levelStart(lv);
     const nextBase = levelStart(lv + 1);
-    const title = api.LEVEL_TITLES[Math.min(lv - 1, api.LEVEL_TITLES.length - 1)] || '';
     const isCur = lv === info.level;
     levelRows.push(`<tr class="${isCur ? 'exp-cur-level' : ''}">
-      <td>Lv.${lv}</td><td>${base}</td><td>${nextBase}</td>
-      <td>${escapeHtml(title)}</td><td>${isCur ? '← 当前' : ''}</td>
+      <td>Lv.${lv}</td><td>${base}</td><td>${nextBase}</td><td>${isCur ? '← 当前' : ''}</td>
     </tr>`);
   }
 
@@ -1993,7 +1991,6 @@ async function renderExp(app) {
       <div class="exp-level-row">
         <div class="exp-level-badge">Lv.${info.level}</div>
         <div class="exp-level-meta">
-          <div class="exp-level-title">${escapeHtml(info.title)}</div>
           <div class="exp-points">累计积分 <b>${info.exp}</b></div>
         </div>
       </div>
@@ -2017,10 +2014,10 @@ async function renderExp(app) {
     <div class="card">
       <h3 style="margin-top:0">🏆 等级积分表</h3>
       <table class="exp-table">
-        <thead><tr><th>等级</th><th>所需积分</th><th>下一级</th><th>头衔</th><th></th></tr></thead>
+        <thead><tr><th>等级</th><th>所需积分</th><th>下一级</th><th></th></tr></thead>
         <tbody>${levelRows.join('')}</tbody>
       </table>
-      <p class="hint">超过 Lv.10 后每级 +1000 积分递增。</p>
+      <p class="hint">超过 Lv.10 后每级 +${api.LEVEL_STEP_BEYOND} 积分递增。</p>
     </div>
 
     <div class="toolbar">
@@ -2029,6 +2026,128 @@ async function renderExp(app) {
     </div>
   `;
 }
+
+// ==================== 视图：系统消息页（notifications 列表 + 全部已读）====================
+async function renderNotifications(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  const host = app;
+  host.innerHTML = `
+    <div class="toolbar">
+      <h3 style="margin:0">🔔 系统消息</h3>
+      <button class="secondary" id="notifMarkAllBtn" onclick="markAllNotificationsRead()">全部标为已读</button>
+    </div>
+    <div class="card"><div id="notifList" class="empty">🔄 加载中...</div></div>
+    <div id="notifPager" style="margin-top:10px;display:flex;gap:8px;justify-content:center"></div>
+  `;
+  window._notifPage = 1;
+  loadNotifications(1);
+}
+
+async function loadNotifications(page) {
+  window._notifPage = page;
+  const listEl = document.getElementById('notifList');
+  const pagerEl = document.getElementById('notifPager');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  let r;
+  try {
+    r = await api.notifications.list(page, 20);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty">❌ 加载失败：${escapeHtml(e && e.message || '未知错误')}</div>`;
+    return;
+  }
+  if (!r || !r.success) {
+    listEl.innerHTML = `<div class="empty">❌ ${escapeHtml((r && r.message) || '加载失败')}</div>`;
+    return;
+  }
+  const items = r.data || [];
+  const pg = r.pagination || {};
+  if (!items.length) {
+    listEl.innerHTML = `<div class="empty">📭 暂无系统消息。<br>发帖、评论、被点赞、被回复时会在这里收到积分变动通知。</div>`;
+    if (pagerEl) pagerEl.innerHTML = '';
+    return;
+  }
+  listEl.innerHTML = items.map(n => `
+    <div class="notif-item${n.isRead ? '' : ' notif-unread'}" onclick="markNotificationRead(${n.id})">
+      <div class="notif-icon">${notifIcon(n.type)}</div>
+      <div class="notif-body">
+        <div class="notif-content">${escapeHtml(n.content)}</div>
+        <div class="notif-meta">${escapeHtml(n.createdAt)}${n.expDelta ? ` ｜ <b style="color:#f97316">+${n.expDelta}</b> 积分` : ''}</div>
+      </div>
+      ${n.isRead ? '' : '<span class="notif-dot" title="未读"></span>'}
+    </div>
+  `).join('');
+  // 分页
+  if (pagerEl) {
+    const totalPages = pg.totalPages || 1;
+    if (totalPages <= 1) {
+      pagerEl.innerHTML = '';
+    } else {
+      pagerEl.innerHTML = `
+        <button class="ghost" ${page <= 1 ? 'disabled' : ''} onclick="loadNotifications(${page - 1})">上一页</button>
+        <span style="line-height:32px;font-size:13px;color:#6b7280">第 ${page} / ${totalPages} 页</span>
+        <button class="ghost" ${page >= totalPages ? 'disabled' : ''} onclick="loadNotifications(${page + 1})">下一页</button>
+      `;
+    }
+  }
+}
+
+// 通知类型 → 图标
+function notifIcon(type) {
+  switch (type) {
+    case 'post':     return '📝';
+    case 'comment':  return '💬';
+    case 'liked':    return '❤️';
+    case 'replied': return '↩️';
+    default:         return '🔔';
+  }
+}
+
+window.loadNotifications = loadNotifications;
+window.markNotificationRead = async function (id) {
+  // 标记单条已读并局部更新样式（不重载整页）
+  try {
+    await api.notifications.markRead(id);
+  } catch {}
+  document.querySelectorAll('.notif-item').forEach(el => {
+    if (el.getAttribute('onclick') && el.getAttribute('onclick').includes(`markNotificationRead(${id})`)) {
+      el.classList.remove('notif-unread');
+      const dot = el.querySelector('.notif-dot');
+      if (dot) dot.remove();
+    }
+  });
+  refreshNotificationBadge();
+};
+window.markAllNotificationsRead = async function () {
+  try {
+    await api.notifications.markAllRead();
+  } catch {}
+  document.querySelectorAll('.notif-item').forEach(el => {
+    el.classList.remove('notif-unread');
+    const dot = el.querySelector('.notif-dot');
+    if (dot) dot.remove();
+  });
+  refreshNotificationBadge();
+};
+
+// 刷新顶栏铃铛红点（不动整页）
+async function refreshNotificationBadge() {
+  let count = 0;
+  try {
+    const r = await api.notifications.unreadCount();
+    if (r && r.success) count = r.data.count || 0;
+  } catch {}
+  document.querySelectorAll('.nav-bell').forEach(bell => {
+    const existing = bell.querySelector('.unread-badge');
+    if (count > 0) {
+      if (existing) existing.textContent = count;
+      else bell.insertAdjacentHTML('beforeend', `<span class="unread-badge">${count}</span>`);
+    } else if (existing) {
+      existing.remove();
+    }
+  });
+}
+window.refreshNotificationBadge = refreshNotificationBadge;
 
 async function renderMe(app) {
   if (!api.isLoggedIn()) { location.hash = 'login'; return; }
@@ -3119,7 +3238,7 @@ window.doPost = async function doPost() {
   btn.disabled = true; btn.textContent = '发布中...';
   try {
     const r = await api.posts.create(title, content, tags, category, draftPostPinned, imageIds);
-    if (r.success) location.hash = 'forum';
+    if (r.success) { location.hash = 'forum'; refreshNotificationBadge(); }
     else alert(r.message || '发布失败');
   } finally {
     btn.disabled = false; btn.textContent = '发布';
