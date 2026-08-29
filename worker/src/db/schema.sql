@@ -156,6 +156,60 @@ CREATE TABLE IF NOT EXISTS notifications (
   FOREIGN KEY (uid) REFERENCES users(uid)
 );
 
+-- 公会表
+CREATE TABLE IF NOT EXISTS guilds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,              -- 公会名称（唯一）
+  description TEXT,                        -- 简介
+  icon TEXT,                               -- 图标 emoji 或字符
+  owner_uid TEXT,                          -- 创始者（可为空，管理员直接创建的）
+  status TEXT NOT NULL DEFAULT 'active',   -- active / banned
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (owner_uid) REFERENCES users(uid)
+);
+
+-- 公会成员表（每个用户只能属于一个公会）
+CREATE TABLE IF NOT EXISTS guild_members (
+  guild_id INTEGER NOT NULL,
+  uid TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',     -- owner / admin / member
+  joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (uid),                      -- 一个用户只能属于一个公会
+  FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+  FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_guild_members_guild ON guild_members(guild_id);
+
+-- 公会加入申请表
+CREATE TABLE IF NOT EXISTS guild_join_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id INTEGER NOT NULL,
+  uid TEXT NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending / approved / rejected
+  reviewed_by TEXT,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(guild_id, uid, status) WHERE status = 'pending',  -- 每个用户对每个公会只能有一个 pending 申请
+  FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+  FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
+);
+
+-- 公会创建申请表（普通用户申请新建公会，需管理员审批）
+CREATE TABLE IF NOT EXISTS guild_create_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  requester_uid TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  icon TEXT,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending / approved / rejected
+  reviewed_by TEXT,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (requester_uid) REFERENCES users(uid) ON DELETE CASCADE
+);
+
 -- ============ 索引（SQLite 默认 B-tree 主键够用，但常用查询建索引更稳）============
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_uid);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);

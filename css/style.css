@@ -795,3 +795,183 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
   font-size: 11px; color: #9ca3af; padding-top: 6px;
   border-top: 1px dashed #f0f0f0;
 }
+
+/* ==================== 公会系统 ==================== */
+
+/* 公会徽章（显示在昵称/头像前） */
+.guild-badge {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 11px; font-weight: 500; color: #7c3aed;
+  background: #ede9fe;
+  padding: 1px 6px; border-radius: 10px;
+  margin-left: 6px; cursor: pointer;
+  transition: background .15s;
+  vertical-align: middle;
+}
+.guild-badge:hover { background: #ddd6fe; }
+
+/* 公会卡片网格 */
+.guild-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.guild-card {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+  padding: 16px; cursor: pointer;
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.guild-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.08);
+  border-color: #c4b5fd;
+}
+
+.guild-icon {
+  width: 48px; height: 48px; font-size: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  border-radius: 12px; flex-shrink: 0;
+}
+.guild-card .guild-body { flex: 1; min-width: 0; }
+.guild-card .guild-name {
+  font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.guild-card .guild-desc {
+  font-size: 12px; color: #6b7280; margin-bottom: 6px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.4;
+}
+.guild-card .guild-meta { font-size: 11px; color: #9ca3af; }
+
+/* 公会详情页头部 */
+.guild-detail-header { text-align: center; padding: 28px 20px; }
+.guild-detail-header .guild-icon {
+  width: 80px; height: 80px; font-size: 48px;
+  margin: 0 auto 14px;
+  border-radius: 20px;
+}
+.guild-detail-header .guild-name {
+  font-size: 22px; font-weight: 700; color: #1f2937; margin-bottom: 4px;
+}
+.guild-detail-header .guild-desc {
+  font-size: 13px; color: #6b7280; margin-bottom: 10px;
+}
+.guild-detail-header .guild-meta {
+  font-size: 12px; color: #9ca3af; margin-bottom: 16px;
+}
+.guild-detail-header .guild-actions {
+  display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+}
+
+/* 公会成员列表 */
+.guild-member-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.guild-member {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid #f3f4f6; border-radius: 8px;
+  cursor: pointer; transition: background .15s;
+}
+.guild-member:hover { background: #f9fafb; border-color: #e5e7eb; }
+.guild-member-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #e5e7eb; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: #6b7280; flex-shrink: 0;
+  overflow: hidden;
+}
+.guild-member-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.guild-member-name {
+  font-size: 13px; color: #1f2937;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.guild-member-role {
+  font-size: 10px; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;
+}
+.guild-member-role.role-owner { background: #fef3c7; color: #92400e; }
+.guild-member-role.role-admin { background: #ede9fe; color: #7c3aed; }
+.guild-member-role.role-member { background: #f3f4f6; color: #6b7280; }
+
+/* 管理员公会管理面板 */
+.admin-guild-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px;
+  margin-bottom: 6px; flex-wrap: wrap;
+}
+.admin-guild-row.ag-banned { opacity: .75; border-color: #fecaca; background: #fef2f2; }
+.admin-guild-row .ag-icon { font-size: 22px; width: 32px; text-align: center; }
+.admin-guild-row .ag-info { flex: 1; min-width: 160px; }
+.admin-guild-row .ag-name { font-size: 14px; font-weight: 600; color: #1f2937; }
+.admin-guild-row .ag-sub { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+.admin-guild-row .ag-status {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+}
+.admin-guild-row .ag-status.s-active { background: #dcfce7; color: #15803d; }
+.admin-guild-row .ag-status.s-banned { background: #fee2e2; color: #dc2626; }
+.admin-guild-row .ag-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.admin-guild-row .ag-actions button {
+  font-size: 11px; padding: 3px 8px; border-radius: 5px; border: 1px solid #e5e7eb;
+  background: #fff; cursor: pointer;
+}
+.admin-guild-row .ag-actions button:hover { background: #f3f4f6; }
+.admin-guild-row .ag-actions button.danger { border-color: #fecaca; color: #dc2626; background: #fff; }
+.admin-guild-row .ag-actions button.danger:hover { background: #fef2f2; }
+.admin-guild-row .ag-actions button.warn { border-color: #fde68a; color: #92400e; background: #fffbeb; }
+.admin-guild-row .ag-actions button.warn:hover { background: #fef3c7; }
+
+.admin-guild-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.admin-guild-tabs button {
+  padding: 5px 12px; border: 1px solid #e5e7eb; border-radius: 16px;
+  background: #fff; font-size: 12px; cursor: pointer; color: #4b5563;
+}
+.admin-guild-tabs button.active {
+  background: #7c3aed; color: #fff; border-color: #7c3aed;
+}
+
+.admin-guild-detail {
+  border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 12px;
+  background: #fafafa;
+}
+.admin-guild-detail h4 { margin: 0 0 10px; font-size: 14px; color: #1f2937; }
+
+.admin-guild-member-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 6px; font-size: 12px;
+}
+.admin-guild-member-row:hover { background: #f3f4f6; }
+.admin-guild-member-row .agm-name { flex: 1; color: #374151; }
+.admin-guild-member-row .agm-uid { color: #9ca3af; font-family: monospace; font-size: 11px; }
+.admin-guild-member-row button {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #e5e7eb;
+  background: #fff; cursor: pointer;
+}
+.admin-guild-member-row button.danger { border-color: #fecaca; color: #dc2626; }
+
+.admin-request-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+  margin-bottom: 4px; font-size: 12px; flex-wrap: wrap;
+}
+.admin-request-row.pending { border-color: #fde68a; background: #fffbeb; }
+.admin-request-row .ar-info { flex: 1; min-width: 200px; }
+.admin-request-row .ar-title { font-weight: 500; color: #1f2937; }
+.admin-request-row .ar-sub { color: #6b7280; font-size: 11px; margin-top: 2px; }
+.admin-request-row .ar-actions { display: flex; gap: 4px; }
+.admin-request-row button {
+  font-size: 11px; padding: 3px 10px; border-radius: 5px; border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+.admin-request-row button.approve { background: #dcfce7; color: #15803d; border-color: #86efac; }
+.admin-request-row button.reject { background: #fee2e2; color: #dc2626; border-color: #fecaca; }
+.admin-request-row .ar-status {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+}
+.admin-request-row .ar-status.pending { background: #fef3c7; color: #92400e; }
+.admin-request-row .ar-status.approved { background: #dcfce7; color: #15803d; }
+.admin-request-row .ar-status.rejected { background: #fee2e2; color: #dc2626; }

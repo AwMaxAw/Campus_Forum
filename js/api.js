@@ -609,3 +609,100 @@ export const admin = {
     });
   },
 };
+
+// ======================== 公会系统 ========================
+export const guilds = {
+  /** 列出所有 active 公会 */
+  async list() {
+    return request('/api/guilds', { needsAuth: false });
+  },
+  /** 公会详情（含成员列表） */
+  async detail(id) {
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/${id}`, { needsAuth: false });
+  },
+  /** 我所在的公会 */
+  async mine() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/guilds/my/me');
+  },
+  /** 申请加入公会 */
+  async apply(id, reason) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/${id}/apply`, { method: 'POST', body: { reason: reason || '' } });
+  },
+  /** 退出公会 */
+  async leave(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/${id}/leave`, { method: 'POST' });
+  },
+  /** 申请新建公会 */
+  async createRequest(payload) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/guilds/create-request', { method: 'POST', body: payload });
+  },
+
+  // --- 运维管理员专属 ---
+  async adminList() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/guilds/admin/list');
+  },
+  async adminCreate(payload) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/guilds/admin', { method: 'POST', body: payload });
+  },
+  async adminEdit(id, payload) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/admin/${id}`, { method: 'PUT', body: payload });
+  },
+  async adminDelete(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/admin/${id}`, { method: 'DELETE' });
+  },
+  async adminBan(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/admin/${id}/ban`, { method: 'POST' });
+  },
+  async adminUnban(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少 id' };
+    return request(`/api/guilds/admin/${id}/unban`, { method: 'POST' });
+  },
+  async adminAddMember(guildId, uid, role = 'member') {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/guilds/admin/${guildId}/members`, { method: 'POST', body: { uid, role } });
+  },
+  async adminRemoveMember(guildId, uid) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/guilds/admin/${guildId}/members/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+  },
+  async adminJoinRequests() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/guilds/admin/join-requests');
+  },
+  async adminApproveJoin(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/guilds/admin/join-requests/${id}/approve`, { method: 'POST' });
+  },
+  async adminRejectJoin(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/guilds/admin/join-requests/${id}/reject`, { method: 'POST' });
+  },
+  async adminCreateRequests() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/guilds/admin/create-requests');
+  },
+  async adminApproveCreate(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/guilds/admin/create-requests/${id}/approve`, { method: 'POST' });
+  },
+  async adminRejectCreate(id) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request(`/api/guilds/admin/create-requests/${id}/reject`, { method: 'POST' });
+  },
+};

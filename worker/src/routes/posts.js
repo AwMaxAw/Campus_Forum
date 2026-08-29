@@ -60,6 +60,9 @@ function mapPostRow(row) {
     authorRole: row.author_role || null,
     authorAvatarUrl: row.author_avatar_url || null,
     authorExpPoints: row.author_exp_points != null ? Number(row.author_exp_points) : 0,
+    authorGuildId: row.author_guild_id != null ? Number(row.author_guild_id) : null,
+    authorGuildName: row.author_guild_name || null,
+    authorGuildIcon: row.author_guild_icon || null,
     authorUpdatedAt: row.author_updated_at || null,
     category: row.category,
     tags: parseTags(row.tags),
@@ -150,9 +153,12 @@ posts.get('/', async (c) => {
 
     const rows = await db
       .prepare(
-        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role, u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points, u.updated_at AS author_updated_at
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role, u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points, u.updated_at AS author_updated_at,
+                gu.id AS author_guild_id, gu.name AS author_guild_name, gu.icon AS author_guild_icon
          FROM posts p
          LEFT JOIN users u ON u.uid = p.author_uid
+         LEFT JOIN guild_members gm ON gm.uid = p.author_uid
+         LEFT JOIN guilds gu ON gu.id = gm.guild_id AND gu.status = 'active'
          WHERE ${whereSQL}
          ORDER BY ${orderSQL}
          LIMIT ? OFFSET ?`
@@ -267,7 +273,10 @@ posts.get('/:id', async (c) => {
                     (SELECT role FROM users WHERE uid = author_uid) AS author_role,
                     (SELECT avatar_url FROM users WHERE uid = author_uid) AS author_avatar_url,
                     (SELECT exp_points FROM users WHERE uid = author_uid) AS author_exp_points,
-                    (SELECT updated_at FROM users WHERE uid = author_uid) AS author_updated_at`
+                    (SELECT updated_at FROM users WHERE uid = author_uid) AS author_updated_at,
+                    (SELECT gu.id FROM guild_members gm JOIN guilds gu ON gu.id = gm.guild_id WHERE gm.uid = author_uid AND gu.status = 'active' LIMIT 1) AS author_guild_id,
+                    (SELECT gu.name FROM guild_members gm JOIN guilds gu ON gu.id = gm.guild_id WHERE gm.uid = author_uid AND gu.status = 'active' LIMIT 1) AS author_guild_name,
+                    (SELECT gu.icon FROM guild_members gm JOIN guilds gu ON gu.id = gm.guild_id WHERE gm.uid = author_uid AND gu.status = 'active' LIMIT 1) AS author_guild_icon`
     )
     .bind(id)
     .first();
@@ -406,8 +415,9 @@ posts.post('/', requireAuth(), async (c) => {
       .prepare(
         `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role,
                 u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points,
-                u.updated_at AS author_updated_at
-         FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
+                u.updated_at AS author_updated_at,
+                gu.id AS author_guild_id, gu.name AS author_guild_name, gu.icon AS author_guild_icon
+         FROM posts p LEFT JOIN users u ON u.uid = p.author_uid LEFT JOIN guild_members gm ON gm.uid = p.author_uid LEFT JOIN guilds gu ON gu.id = gm.guild_id AND gu.status = 'active' WHERE p.id = ?`
       )
       .bind(postId)
       .first();
@@ -483,8 +493,9 @@ posts.put('/:id', requireAuth(), async (c) => {
       .prepare(
         `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role,
                 u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points,
-                u.updated_at AS author_updated_at
-         FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
+                u.updated_at AS author_updated_at,
+                gu.id AS author_guild_id, gu.name AS author_guild_name, gu.icon AS author_guild_icon
+         FROM posts p LEFT JOIN users u ON u.uid = p.author_uid LEFT JOIN guild_members gm ON gm.uid = p.author_uid LEFT JOIN guilds gu ON gu.id = gm.guild_id AND gu.status = 'active' WHERE p.id = ?`
       )
       .bind(id)
       .first();

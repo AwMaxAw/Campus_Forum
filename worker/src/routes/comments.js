@@ -44,6 +44,9 @@ function mapCommentRow(row) {
     authorRole: row.author_role || null,
     authorAvatarUrl: row.author_avatar_url || null,
     authorExpPoints: row.author_exp_points != null ? Number(row.author_exp_points) : 0,
+    authorGuildId: row.author_guild_id != null ? Number(row.author_guild_id) : null,
+    authorGuildName: row.author_guild_name || null,
+    authorGuildIcon: row.author_guild_icon || null,
     content: row.is_hidden ? null : row.content,  // 被软删的内容不给前端
     replyToId: row.reply_to_id,
     replyToAuthorNickname: row.reply_to_author_nickname || null,
@@ -67,9 +70,12 @@ comments.get('/', async (c) => {
               u.role AS author_role,
               u.avatar_url AS author_avatar_url,
               u.exp_points AS author_exp_points,
+              gu.id AS author_guild_id, gu.name AS author_guild_name, gu.icon AS author_guild_icon,
               ru.nickname AS reply_to_author_nickname
        FROM comments c
        LEFT JOIN users u ON u.uid = c.author_uid
+       LEFT JOIN guild_members gm ON gm.uid = c.author_uid
+       LEFT JOIN guilds gu ON gu.id = gm.guild_id AND gu.status = 'active'
        LEFT JOIN comments rc ON rc.id = c.reply_to_id
        LEFT JOIN users ru ON ru.uid = rc.author_uid
        WHERE c.post_id = ?
@@ -141,9 +147,12 @@ comments.post('/', requireAuth(), async (c) => {
               u.role AS author_role,
               u.avatar_url AS author_avatar_url,
               u.exp_points AS author_exp_points,
+              gu.id AS author_guild_id, gu.name AS author_guild_name, gu.icon AS author_guild_icon,
               ru.nickname AS reply_to_author_nickname
        FROM comments c
        LEFT JOIN users u ON u.uid = c.author_uid
+       LEFT JOIN guild_members gm ON gm.uid = c.author_uid
+       LEFT JOIN guilds gu ON gu.id = gm.guild_id AND gu.status = 'active'
        LEFT JOIN comments rc ON rc.id = c.reply_to_id
        LEFT JOIN users ru ON ru.uid = rc.author_uid
        WHERE c.id = ?`

@@ -52,6 +52,7 @@ import imagesRoutes from './routes/images.js';
 import feedbacksRoutes from './routes/feedbacks.js';
 import notificationsRoutes from './routes/notifications.js';
 import checkinRoutes from './routes/checkin.js';
+import guildsRoutes from './routes/guilds.js';
 
 const app = new Hono();
 
@@ -83,6 +84,7 @@ app.route('/api/images', imagesRoutes);
 app.route('/api/feedbacks', feedbacksRoutes);
 app.route('/api/notifications', notificationsRoutes);
 app.route('/api/checkin', checkinRoutes);
+app.route('/api/guilds', guildsRoutes);
 
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
@@ -228,6 +230,83 @@ app.use('*', async (c, next) => {
           )
         `).run();
         await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_check_ins_uid_date ON check_ins(uid, check_date DESC)').run();
+      }
+      // guilds 表
+      const rGuilds = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('guilds')")
+        .first();
+      if (rGuilds && rGuilds.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS guilds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            icon TEXT,
+            owner_uid TEXT,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (owner_uid) REFERENCES users(uid)
+          )
+        `).run();
+      }
+      // guild_members 表
+      const rGm = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('guild_members')")
+        .first();
+      if (rGm && rGm.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS guild_members (
+            guild_id INTEGER NOT NULL,
+            uid TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (uid),
+            FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+            FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
+          )
+        `).run();
+        await c.env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_guild_members_guild ON guild_members(guild_id)').run();
+      }
+      // guild_join_requests 表
+      const rGjr = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('guild_join_requests')")
+        .first();
+      if (rGjr && rGjr.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS guild_join_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            uid TEXT NOT NULL,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by TEXT,
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (guild_id) REFERENCES guilds(id) ON DELETE CASCADE,
+            FOREIGN KEY (uid) REFERENCES users(uid) ON DELETE CASCADE
+          )
+        `).run();
+      }
+      // guild_create_requests 表
+      const rGcr = await c.env.DB
+        .prepare("SELECT COUNT(*) AS c FROM pragma_table_info('guild_create_requests')")
+        .first();
+      if (rGcr && rGcr.c === 0) {
+        await c.env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS guild_create_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            requester_uid TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            icon TEXT,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by TEXT,
+            reviewed_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (requester_uid) REFERENCES users(uid) ON DELETE CASCADE
+          )
+        `).run();
       }
       autoMigrated = true; // 全部成功才标记，失败则下次请求重试
     } catch (e) {

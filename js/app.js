@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260829-exp';
+import * as api from './api.js?v=20260829-guild';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -46,6 +46,18 @@ function formatTime(iso) {
     const p = n => String(n).padStart(2,'0');
     return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   } catch { return iso; }
+}
+
+/** 渲染公会徽章（如果用户在公会中则显示） */
+function guildBadge(author) {
+  if (!author) return '';
+  const name = author.authorGuildName || author.guildName;
+  const icon = author.authorGuildIcon || author.guildIcon || '🏰';
+  if (!name) return '';
+  const id = author.authorGuildId || author.guildId;
+  const title = `${icon} ${escapeHtml(name)}`;
+  const onclick = id ? `onclick="event.stopPropagation();location.hash='#guild/${id}'"` : '';
+  return `<span class="guild-badge" title="${title}" ${onclick}>${icon} ${escapeHtml(name)}</span>`;
 }
 
 /**
@@ -251,6 +263,7 @@ function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
     ? [
         { label: '首页',     icon: '🏠', hash: 'home' },
         { label: '广场',     icon: '📢', hash: 'forum' },
+        { label: '公会',     icon: '🏰', hash: 'guilds' },
         { label: '日历',     icon: '📅', hash: 'calendar' },
         { label: '我的',     icon: '👤', hash: 'me' },
         { label: '积分',     icon: '🏆', hash: 'exp' },
@@ -263,6 +276,7 @@ function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
       ]
     : [
         { label: '首页',     icon: '🏠', hash: 'home' },
+        { label: '公会',     icon: '🏰', hash: 'guilds' },
         { label: '日历',     icon: '📅', hash: 'calendar' },
         { label: '公告',     icon: '📋', hash: 'announcements' },
         { label: 'FAQ',      icon: '❓', hash: 'faq' },
@@ -304,7 +318,8 @@ function postCard(p, opts = {}) {
   const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
   const authorLevel = api.getLevelInfo(p.authorExpPoints, p.authorRole);
   const levelBadge = `<span class="level-badge${authorLevel.isAdmin ? ' admin' : ''}">Lv.${authorLevel.level}</span>`;
-  const authorHtml = `<span class="post-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(authorUser)}</span><span class="post-author-name">${escapeHtml(author)}</span>${levelBadge}</span>`;
+  const guildBadgeHtml = guildBadge(p);
+  const authorHtml = `<span class="post-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(authorUser)}</span><span class="post-author-name">${escapeHtml(author)}</span>${guildBadgeHtml}${levelBadge}</span>`;
   const tags = (Array.isArray(p.tags) && p.tags.length)
     ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
          ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${escapeHtml(JSON.stringify(t))})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
@@ -1284,12 +1299,14 @@ function postCardCompact(p) {
     : '';
   const pinnedBadge = p.isPinned ? `<span class="wfall-pinned">📌 置顶</span>` : '';
   const catBadge = categoryBadgeHtml(p.category, { compact: true });
-  // 作者头像+昵称+Lv
+  // 作者头像+昵称+Lv+公会
   const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt };
   const lvlInfo = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const authorGuild = guildBadge(p);
   const authorMeta = `<span class="wfall-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'">
     <span class="avatar-xs">${buildAvatarInner(authorUser)}</span>
     <span>${escapeHtml(p.authorNickname || ('用户' + p.authorUid))}</span>
+    ${authorGuild}
     <span class="level-badge${lvlInfo.isAdmin ? ' admin' : ''}">Lv.${lvlInfo.level}</span>
   </span>`;
   return `
@@ -1759,11 +1776,12 @@ async function renderDetail(app, postId) {
        </div>`
     : '';
 
-  // 作者可点击进主页（头像+昵称+Lv）
+  // 作者可点击进主页（头像+昵称+公会+Lv）
   const detailAuthorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
   const detailAuthorLevel = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const detailGuild = guildBadge(p);
   const detailLevelBadge = `<span class="level-badge${detailAuthorLevel.isAdmin ? ' admin' : ''}">Lv.${detailAuthorLevel.level}</span>`;
-  const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>${detailLevelBadge}</span>`;
+  const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>${detailGuild}${detailLevelBadge}</span>`;
 
   app.innerHTML = `
     <div style="margin-bottom:10px">
@@ -1987,11 +2005,13 @@ async function loadAndRenderComments(postId) {
       headerLeft = `<span class="comment-author">已删除用户</span>`;
     } else {
       const authorLevel = api.getLevelInfo(c.authorExpPoints, c.authorRole);
+      const authorGuild = guildBadge(c);
       const authorUser = { uid: c.authorUid, nickname: c.authorNickname, avatarUrl: c.authorAvatarUrl, createdAt: c.createdAt };
       const lvlBadge = `<span class="level-badge${authorLevel.isAdmin ? ' admin' : ''}">Lv.${authorLevel.level}</span>`;
       headerLeft = `<span class="comment-author-info" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(c.authorUid)}'">
         <span class="avatar-xs comment-avatar">${buildAvatarInner(authorUser)}</span>
         <span class="comment-author">${escapeHtml(c.authorNickname || `用户${c.authorUid}`)}</span>
+        ${authorGuild}
         ${lvlBadge}
       </span>`;
     }
@@ -2948,6 +2968,22 @@ async function renderAdmin(app) {
       <p class="hint">除置顶帖外的全部帖子，按发布时间倒序列出。点击标题可跳转详情页编辑/管理。</p>
       <div id="adminPosts">🔄 加载中...</div>
     </div>
+
+    <!-- 板块5：公会管理 -->
+    <div class="card">
+      <h3 style="margin-top:0">🏰 公会管理</h3>
+      <p class="hint">查看所有公会，编辑/注销/封禁，管理成员，审批加入和创建申请。</p>
+      <div id="adminGuilds">
+        <div class="admin-guild-tabs">
+          <button data-tab="guilds" class="active" onclick="window._adminGuildTab='guilds';renderAdminGuildsContent()">📋 所有公会 <span id="agCount" style="opacity:.6"></span></button>
+          <button data-tab="members" onclick="window._adminGuildTab='members';renderAdminGuildsContent()">👥 成员管理</button>
+          <button data-tab="joinRequests" onclick="window._adminGuildTab='joinRequests';renderAdminGuildsContent()">📥 加入申请 <span id="agJrCount" style="opacity:.6"></span></button>
+          <button data-tab="createRequests" onclick="window._adminGuildTab='createRequests';renderAdminGuildsContent()">📝 建会申请 <span id="agCrCount" style="opacity:.6"></span></button>
+          <button onclick="adminGuildQuickCreate()">➕ 直接建公会</button>
+        </div>
+        <div id="adminGuildsContent">🔄 加载中...</div>
+      </div>
+    </div>
   `;
 
   // --- 板块1：账号列表（含最后登录时间 / 状态 / 注销·封禁操作）---
@@ -3066,7 +3102,423 @@ async function renderAdmin(app) {
         }).join('')}`;
     } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
   })();
+
+  // --- 板块5：公会管理 ---
+  window._adminGuildTab = 'guilds';
+  renderAdminGuildsContent();
 }
+
+// ==================== 管理员：公会管理面板 ====================
+// 缓存（避免频繁请求）
+let _adminGuildsCache = null;          // 公会列表
+let _adminJoinRequestsCache = null;     // 加入申请
+let _adminCreateRequestsCache = null;   // 建会申请
+let _adminGuildDetailCache = {};        // { [guildId]: guildDetail }
+
+async function renderAdminGuildsContent() {
+  const host = document.getElementById('adminGuildsContent');
+  if (!host) return;
+
+  // Tab 按钮激活态
+  document.querySelectorAll('.admin-guild-tabs button[data-tab]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-tab') === window._adminGuildTab);
+  });
+
+  switch (window._adminGuildTab) {
+    case 'guilds':      return renderAdminGuildsList(host);
+    case 'members':     return renderAdminGuildsMembers(host);
+    case 'joinRequests': return renderAdminGuildsJoinRequests(host);
+    case 'createRequests': return renderAdminGuildsCreateRequests(host);
+  }
+}
+
+// ---- 所有公会 tab ----
+async function renderAdminGuildsList(host) {
+  host.innerHTML = '🔄 加载中...';
+  let list = _adminGuildsCache;
+  if (!list) {
+    try {
+      const r = await api.guilds.adminList();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      list = r.data || [];
+      _adminGuildsCache = list;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+  }
+  // 更新数量徽标
+  document.getElementById('agCount').textContent = list.length ? `(${list.length})` : '';
+
+  if (list.length === 0) {
+    host.innerHTML = `<div class="hint">暂无公会。点击右上「➕ 直接建公会」快速创建。</div>`;
+    return;
+  }
+
+  host.innerHTML = list.map(g => {
+    const isBanned = g.status === 'banned';
+    return `
+      <div class="admin-guild-row${isBanned ? ' ag-banned' : ''}" data-gid="${g.id}">
+        <div class="ag-icon">${escapeHtml(g.icon || '🏰')}</div>
+        <div class="ag-info">
+          <div class="ag-name">${escapeHtml(g.name)}</div>
+          <div class="ag-sub">ID: ${g.id} · 👥 ${g.memberCount || 0} 人${g.ownerNickname ? ` · 创始者: ${escapeHtml(g.ownerNickname)}` : ''}</div>
+          ${g.description ? `<div class="ag-sub" style="margin-top:2px">${escapeHtml(g.description)}</div>` : ''}
+        </div>
+        <span class="ag-status ${isBanned ? 's-banned' : 's-active'}">${isBanned ? '已封禁' : '正常'}</span>
+        <div class="ag-actions">
+          <button onclick="adminGuildEdit(${g.id})">✏️ 编辑</button>
+          <button onclick="window._adminGuildTab='members';window._adminGuildMembersSel=${g.id};renderAdminGuildsContent()">👥 成员</button>
+          ${isBanned
+            ? `<button class="warn" onclick="adminGuildUnban(${g.id})">🔓 解封</button>`
+            : `<button class="warn" onclick="adminGuildBan(${g.id})">🚫 封禁</button>`
+          }
+          <button class="danger" onclick="adminGuildDelete(${g.id}, '${escapeHtml(g.name)}')">🗑 注销</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ---- 成员管理 tab ----
+async function renderAdminGuildsMembers(host) {
+  if (!window._adminGuildMembersSel) {
+    // 默认选第一个公会
+    if (_adminGuildsCache && _adminGuildsCache.length > 0) {
+      window._adminGuildMembersSel = _adminGuildsCache[0].id;
+    } else {
+      // 先加载公会列表
+      try {
+        const r = await api.guilds.adminList();
+        if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+        _adminGuildsCache = r.data || [];
+        window._adminGuildMembersSel = _adminGuildsCache[0]?.id;
+      } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+    }
+  }
+
+  // 公会选择器
+  const guilds = _adminGuildsCache || [];
+  let selHtml = guilds.map(g =>
+    `<option value="${g.id}" ${g.id === window._adminGuildMembersSel ? 'selected' : ''}>${escapeHtml(g.icon || '🏰')} ${escapeHtml(g.name)} (${g.memberCount || 0}人)</option>`
+  ).join('');
+  if (!selHtml) { host.innerHTML = `<div class="hint">暂无公会，请先创建。</div>`; return; }
+
+  host.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center">
+      <label style="font-size:12px;color:#6b7280">选择公会：</label>
+      <select id="agmSel" onchange="window._adminGuildMembersSel=parseInt(this.value);delete _adminGuildDetailCache[window._adminGuildMembersSel];renderAdminGuildsContent()" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px">
+        ${selHtml}
+      </select>
+      <button onclick="adminGuildAddMember()" style="font-size:12px;padding:4px 10px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px">➕ 添加成员</button>
+    </div>
+    <div id="agmDetail">🔄 加载成员...</div>
+  `;
+
+  // 加载详情
+  const gid = window._adminGuildMembersSel;
+  try {
+    let detail = _adminGuildDetailCache[gid];
+    if (!detail) {
+      const r = await api.guilds.detail(gid);
+      if (!r.success) { document.getElementById('agmDetail').innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      detail = r.data;
+      _adminGuildDetailCache[gid] = detail;
+    }
+    const members = detail.members || [];
+    const memberHtml = members.map(m => `
+      <div class="admin-guild-member-row">
+        <span class="agm-role role-${m.role}">${m.role === 'owner' ? '👑' : m.role === 'admin' ? '🛡' : ''}</span>
+        <span class="agm-name">${escapeHtml(m.nickname || `用户${m.uid}`)}</span>
+        <span class="agm-uid">${escapeHtml(m.uid)}</span>
+        <span style="font-size:11px;color:#9ca3af;margin-right:8px">${m.role}</span>
+        ${m.role !== 'owner'
+          ? `<button class="danger" onclick="adminGuildRemoveMember(${gid}, '${escapeHtml(m.uid)}', '${escapeHtml(m.nickname || m.uid)}')">踢出</button>`
+          : `<span style="font-size:11px;color:#9ca3af">创始者</span>`
+        }
+      </div>
+    `).join('') || `<div class="hint">该公会暂无成员</div>`;
+
+    document.getElementById('agmDetail').innerHTML = `
+      <div class="admin-guild-detail">
+        <h4>${escapeHtml(detail.icon || '🏰')} ${escapeHtml(detail.name)} · 共 ${members.length} 人</h4>
+        ${detail.status === 'banned' ? `<div style="color:#dc2626;font-size:12px;margin-bottom:8px">⚠️ 该公会已被封禁</div>` : ''}
+        ${memberHtml}
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById('agmDetail').innerHTML = `❌ ${escapeHtml(e.message)}`;
+  }
+}
+
+// ---- 加入申请 tab ----
+async function renderAdminGuildsJoinRequests(host) {
+  host.innerHTML = '🔄 加载中...';
+  let list = _adminJoinRequestsCache;
+  if (!list) {
+    try {
+      const r = await api.guilds.adminJoinRequests();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      list = r.data || [];
+      _adminJoinRequestsCache = list;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+  }
+  const pendingCount = list.filter(r => r.status === 'pending').length;
+  document.getElementById('agJrCount').textContent = pendingCount ? `(${pendingCount})` : '';
+
+  if (list.length === 0) {
+    host.innerHTML = `<div class="hint">暂无加入申请。</div>`; return;
+  }
+
+  const html = list.map(r => {
+    const isPending = r.status === 'pending';
+    return `
+      <div class="admin-request-row${isPending ? ' pending' : ''}" data-rid="${r.id}">
+        <div class="ar-info">
+          <div class="ar-title">📥 ${escapeHtml(r.applicantNickname || `用户${r.uid}`)} 申请加入 ${escapeHtml(r.guildName)}</div>
+          <div class="ar-sub">UID: ${escapeHtml(r.uid)} · 时间: ${escapeHtml(formatTime(r.createdAt))}${r.reason ? ` · 理由: ${escapeHtml(r.reason)}` : ''}</div>
+        </div>
+        <span class="ar-status ${r.status}">${r.status === 'pending' ? '待审批' : r.status === 'approved' ? '已通过' : '已拒绝'}</span>
+        <div class="ar-actions">
+          ${isPending
+            ? `<button class="approve" onclick="adminGuildReviewJoin(${r.id}, true)">通过</button>
+               <button class="reject" onclick="adminGuildReviewJoin(${r.id}, false)">拒绝</button>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  host.innerHTML = html;
+}
+
+// ---- 建会申请 tab ----
+async function renderAdminGuildsCreateRequests(host) {
+  host.innerHTML = '🔄 加载中...';
+  let list = _adminCreateRequestsCache;
+  if (!list) {
+    try {
+      const r = await api.guilds.adminCreateRequests();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      list = r.data || [];
+      _adminCreateRequestsCache = list;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+  }
+  const pendingCount = list.filter(r => r.status === 'pending').length;
+  document.getElementById('agCrCount').textContent = pendingCount ? `(${pendingCount})` : '';
+
+  if (list.length === 0) {
+    host.innerHTML = `<div class="hint">暂无建会申请。</div>`; return;
+  }
+
+  host.innerHTML = list.map(r => {
+    const isPending = r.status === 'pending';
+    return `
+      <div class="admin-request-row${isPending ? ' pending' : ''}" data-rid="${r.id}">
+        <div class="ar-info">
+          <div class="ar-title">📝 ${escapeHtml(r.applicantNickname || `用户${r.requesterUid}`)} 申请创建 ${escapeHtml(r.icon || '🏰')} <b>${escapeHtml(r.name)}</b></div>
+          <div class="ar-sub">UID: ${escapeHtml(r.requesterUid)} · 时间: ${escapeHtml(formatTime(r.createdAt))}${r.description ? ` · 简介: ${escapeHtml(r.description)}` : ''}${r.reason ? ` · 理由: ${escapeHtml(r.reason)}` : ''}</div>
+        </div>
+        <span class="ar-status ${r.status}">${r.status === 'pending' ? '待审批' : r.status === 'approved' ? '已通过' : '已拒绝'}</span>
+        <div class="ar-actions">
+          ${isPending
+            ? `<button class="approve" onclick="adminGuildReviewCreate(${r.id}, true)">通过（自动建会）</button>
+               <button class="reject" onclick="adminGuildReviewCreate(${r.id}, false)">拒绝</button>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ==================== 管理员：公会操作 ====================
+
+// 编辑公会
+window.adminGuildEdit = async function adminGuildEdit(id) {
+  const g = (_adminGuildsCache || []).find(x => x.id === id);
+  if (!g) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <h3 style="margin-top:0">✏️ 编辑公会</h3>
+      <label style="font-size:12px;color:#6b7280">图标（一个 emoji）</label>
+      <input id="ageIcon" value="${escapeHtml(g.icon || '🏰')}" maxlength="4" style="width:100%;font-size:20px;text-align:center;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">名称</label>
+      <input id="ageName" value="${escapeHtml(g.name)}" maxlength="30" style="width:100%;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">简介</label>
+      <textarea id="ageDesc" maxlength="300" rows="3" style="width:100%">${escapeHtml(g.description || '')}</textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="secondary" onclick="this.closest('.modal-backdrop').remove()">取消</button>
+        <button id="ageSave">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelector('#ageSave').onclick = async () => {
+    const name = modal.querySelector('#ageName').value.trim();
+    if (!name) { alert('名称不能为空'); return; }
+    try {
+      const r = await api.guilds.adminEdit(id, {
+        name,
+        icon: modal.querySelector('#ageIcon').value.trim() || '🏰',
+        description: modal.querySelector('#ageDesc').value.trim(),
+      });
+      if (r.success) {
+        _adminGuildsCache = null;
+        delete _adminGuildDetailCache[id];
+        modal.remove();
+        renderAdminGuildsContent();
+      } else {
+        alert('保存失败：' + (r.message || ''));
+      }
+    } catch (e) { alert('出错：' + e.message); }
+  };
+};
+
+// 封禁 / 解封
+window.adminGuildBan = async function adminGuildBan(id) {
+  if (!confirm('确定封禁该公会？封禁后公会将对普通用户不可见。')) return;
+  try {
+    const r = await api.guilds.adminBan(id);
+    if (r.success) { _adminGuildsCache = null; renderAdminGuildsContent(); }
+    else alert('失败：' + (r.message || ''));
+  } catch (e) { alert('出错：' + e.message); }
+};
+window.adminGuildUnban = async function adminGuildUnban(id) {
+  try {
+    const r = await api.guilds.adminUnban(id);
+    if (r.success) { _adminGuildsCache = null; renderAdminGuildsContent(); }
+    else alert('失败：' + (r.message || ''));
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 注销公会
+window.adminGuildDelete = async function adminGuildDelete(id, name) {
+  if (!confirm(`⚠️ 确定注销公会 "${name}"？\n将同时删除所有成员、申请记录等关联数据，不可恢复！`)) return;
+  if (!confirm('请再确认一次：此操作不可撤销！')) return;
+  try {
+    const r = await api.guilds.adminDelete(id);
+    if (r.success) {
+      _adminGuildsCache = null;
+      delete _adminGuildDetailCache[id];
+      if (window._adminGuildMembersSel === id) window._adminGuildMembersSel = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 添加成员
+window.adminGuildAddMember = async function adminGuildAddMember() {
+  const gid = window._adminGuildMembersSel;
+  if (!gid) { alert('请先选择公会'); return; }
+  const uid = prompt('请输入要添加的用户 UID：');
+  if (!uid) return;
+  const role = (prompt('角色？(member/admin/owner) 输入留空默认为 member：', 'member') || 'member').trim();
+  try {
+    const r = await api.guilds.adminAddMember(gid, uid, role);
+    if (r.success) {
+      delete _adminGuildDetailCache[gid];
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('添加失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 移除成员
+window.adminGuildRemoveMember = async function adminGuildRemoveMember(gid, uid, nickname) {
+  if (!confirm(`确定从公会中踢出 ${nickname} (${uid})？`)) return;
+  try {
+    const r = await api.guilds.adminRemoveMember(gid, uid);
+    if (r.success) {
+      delete _adminGuildDetailCache[gid];
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('踢出失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 审批加入申请
+window.adminGuildReviewJoin = async function adminGuildReviewJoin(id, approve) {
+  try {
+    const fn = approve ? api.guilds.adminApproveJoin : api.guilds.adminRejectJoin;
+    const r = await fn(id);
+    if (r.success) {
+      _adminJoinRequestsCache = null;
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('操作失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 审批建会申请
+window.adminGuildReviewCreate = async function adminGuildReviewCreate(id, approve) {
+  if (approve && !confirm('通过后将自动创建公会并把申请人加入为创始者，确定？')) return;
+  try {
+    const fn = approve ? api.guilds.adminApproveCreate : api.guilds.adminRejectCreate;
+    const r = await fn(id);
+    if (r.success) {
+      _adminCreateRequestsCache = null;
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+      if (approve && r.data && r.data.guildId) {
+        // 新公会详情缓存清空
+        delete _adminGuildDetailCache[r.data.guildId];
+      }
+    } else {
+      alert('操作失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 管理员直接创建公会
+window.adminGuildQuickCreate = async function adminGuildQuickCreate() {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <h3 style="margin-top:0">➕ 直接创建公会</h3>
+      <label style="font-size:12px;color:#6b7280">图标（一个 emoji）</label>
+      <input id="qgcIcon" value="🏰" maxlength="4" style="width:100%;font-size:20px;text-align:center;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">名称（必填）</label>
+      <input id="qgcName" maxlength="30" placeholder="例如：学霸交流群" style="width:100%;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">简介</label>
+      <textarea id="qgcDesc" maxlength="300" rows="3" placeholder="可选" style="width:100%"></textarea>
+      <label style="font-size:12px;color:#6b7280">创始者 UID（可选，留空则不指定）</label>
+      <input id="qgcOwner" placeholder="例如：2612000001" style="width:100%;margin-bottom:8px">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="secondary" onclick="this.closest('.modal-backdrop').remove()">取消</button>
+        <button id="qgcSubmit">创建</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelector('#qgcSubmit').onclick = async () => {
+    const name = modal.querySelector('#qgcName').value.trim();
+    if (!name) { alert('请填写公会名称'); return; }
+    try {
+      const r = await api.guilds.adminCreate({
+        name,
+        icon: modal.querySelector('#qgcIcon').value.trim() || '🏰',
+        description: modal.querySelector('#qgcDesc').value.trim() || null,
+        ownerUid: modal.querySelector('#qgcOwner').value.trim() || null,
+      });
+      if (r.success) {
+        _adminGuildsCache = null;
+        modal.remove();
+        renderAdminGuildsContent();
+      } else {
+        alert('创建失败：' + (r.message || ''));
+      }
+    } catch (e) { alert('出错：' + e.message); }
+  };
+};
 
 function renderAdminPinList() {
   const host = document.getElementById('adminPinned');
@@ -3744,6 +4196,225 @@ async function renderUserProfile(app, uid) {
   `;
 }
 
+// ==================== 公会：公会列表页 ====================
+async function renderGuilds(app) {
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600">🏰 公会广场</span>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        ${api.isLoggedIn() ? `<button class="secondary" onclick="showGuildCreateModal()">📝 申请建公会</button>` : ''}
+      </div>
+    </div>
+    <div id="guildsMyInfo"></div>
+    <div id="guildsList">🔄 加载中...</div>
+  `;
+
+  // 我的公会状态
+  if (api.isLoggedIn()) {
+    try {
+      const r = await api.guilds.mine();
+      if (r.success && r.data) {
+        const g = r.data.guild;
+        const host = document.getElementById('guildsMyInfo');
+        host.innerHTML = `
+          <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b33">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <span style="font-size:24px">${g.icon || '🏰'}</span>
+              <span style="font-weight:600;color:#92400e">我已加入「${escapeHtml(g.name)}」</span>
+              <span class="level-badge">${escapeHtml(r.data.myRole)}</span>
+              <span style="margin-left:auto">成员 ${g.memberCount || 0} 人</span>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="secondary" onclick="location.hash='#guild/${g.id}'">查看公会</button>
+              ${r.data.myRole !== 'owner' ? `<button class="ghost danger-style" onclick="leaveGuild(${g.id})" style="color:#dc2626">退出公会</button>` : ''}
+            </div>
+          </div>`;
+      }
+    } catch {}
+  }
+
+  // 公会列表
+  try {
+    const r = await api.guilds.list();
+    const host = document.getElementById('guildsList');
+    if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+    const guilds = r.data || [];
+    if (guilds.length === 0) {
+      host.innerHTML = `<div class="card"><div class="hint">暂无公会。</div>${api.isLoggedIn() ? `<button onclick="showGuildCreateModal()" style="margin-top:8px">🎉 成为第一个建公会的人</button>` : ''}</div>`;
+      return;
+    }
+
+    host.innerHTML = `<div class="guild-grid">
+      ${guilds.map(g => `
+        <div class="guild-card" onclick="location.hash='#guild/${g.id}'">
+          <div class="guild-icon">${g.icon || '🏰'}</div>
+          <div class="guild-body">
+            <div class="guild-name">${escapeHtml(g.name)}</div>
+            <div class="guild-desc">${escapeHtml(g.description || '暂无简介')}</div>
+            <div class="guild-meta">👥 ${g.memberCount || 0} 人</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+  } catch (e) {
+    document.getElementById('guildsList').innerHTML = `❌ ${escapeHtml(e.message)}`;
+  }
+}
+
+// 显示"申请创建公会"弹窗
+window.showGuildCreateModal = function showGuildCreateModal() {
+  if (!api.isLoggedIn()) { alert('请先登录'); location.hash = 'login'; return; }
+  const html = `
+    <div class="modal-backdrop" onclick="if(event.target===this)document.getElementById('guildCreateModal').remove()">
+      <div class="modal" id="guildCreateModal" style="max-width:480px">
+        <h3 style="margin-top:0">📝 申请创建公会</h3>
+        <p class="hint">新公会需要管理员审批。审批通过后，您将成为公会创始者（Lv.owner）。</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div>
+            <label style="font-size:13px;color:#6b7280">公会图标（一个 emoji）</label>
+            <input id="gcIcon" maxlength="4" placeholder="🏰" value="🏰" style="width:60px;padding:6px;font-size:20px;text-align:center">
+          </div>
+          <div>
+            <label style="font-size:13px;color:#6b7280">公会名称（必填，最多 30 字）</label>
+            <input id="gcName" maxlength="30" placeholder="例如：广五数学社" style="width:100%">
+          </div>
+          <div>
+            <label style="font-size:13px;color:#6b7280">公会简介（最多 300 字）</label>
+            <textarea id="gcDesc" maxlength="300" rows="3" placeholder="介绍一下你的公会..." style="width:100%"></textarea>
+          </div>
+          <div>
+            <label style="font-size:13px;color:#6b7280">申请理由（最多 500 字）</label>
+            <textarea id="gcReason" maxlength="500" rows="2" placeholder="为什么想创建这个公会..." style="width:100%"></textarea>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+          <button class="secondary" onclick="document.getElementById('guildCreateModal').remove()">取消</button>
+          <button onclick="submitGuildCreate()">提交申请</button>
+        </div>
+      </div>
+    </div>`;
+  const existing = document.querySelector('.modal-backdrop');
+  if (existing) existing.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.submitGuildCreate = async function submitGuildCreate() {
+  const name = document.getElementById('gcName').value.trim();
+  if (!name) { alert('请填写公会名称'); return; }
+  const payload = {
+    name,
+    description: document.getElementById('gcDesc').value.trim(),
+    icon: document.getElementById('gcIcon').value.trim() || '🏰',
+    reason: document.getElementById('gcReason').value.trim(),
+  };
+  try {
+    const r = await api.guilds.createRequest(payload);
+    if (r.success) {
+      document.querySelector('.modal-backdrop').remove();
+      alert('✅ 申请已提交，请等待管理员审批');
+    } else {
+      alert('提交失败：' + (r.message || '未知错误'));
+    }
+  } catch (e) {
+    alert('提交出错：' + e.message);
+  }
+};
+
+// 退出公会
+window.leaveGuild = async function leaveGuild(id) {
+  if (!confirm('确定退出该公会吗？')) return;
+  try {
+    const r = await api.guilds.leave(id);
+    if (r.success) { alert('✅ 已退出公会'); location.hash = 'guilds'; }
+    else alert('失败：' + (r.message || '未知错误'));
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// ==================== 公会：详情页 ====================
+async function renderGuildDetail(app, id) {
+  if (!id || id <= 0) { location.hash = 'guilds'; return; }
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+
+  app.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="ghost" onclick="location.hash='guilds'">← 返回公会列表</button>
+    </div>
+    <div id="guildDetailLoading">🔄 加载中...</div>
+  `;
+
+  try {
+    const r = await api.guilds.detail(id);
+    if (!r.success) {
+      document.getElementById('guildDetailLoading').innerHTML = `<div class="card">❌ ${escapeHtml(r.message)}</div>`;
+      return;
+    }
+    const g = r.data;
+    const members = g.members || [];
+
+    // 我的状态
+    let myRole = null;
+    if (api.isLoggedIn() && me) {
+      const m = members.find(x => x.uid === me.uid);
+      myRole = m ? m.role : null;
+    }
+    const isMember = !!myRole;
+    const myStatus = isMember
+      ? `<span class="level-badge">${myRole}</span>`
+      : `<button onclick="applyJoinGuild(${g.id})">📥 申请加入</button>`;
+
+    const membersHtml = members.length === 0
+      ? `<span class="hint">暂无成员</span>`
+      : members.map(m => {
+          const u = { uid: m.uid, nickname: m.nickname, avatarUrl: m.avatarUrl };
+          const roleLabel = m.role === 'owner' ? '👑 创始' : m.role === 'admin' ? '🛡 管理' : '';
+          return `<div class="guild-member" onclick="location.hash='#user/${escapeHtml(m.uid)}'">
+            <span class="avatar-sm">${buildAvatarInner(u)}</span>
+            <span class="guild-member-name">${escapeHtml(m.nickname || `用户${m.uid}`)}</span>
+            ${roleLabel ? `<span style="font-size:11px;color:#6b7280">${roleLabel}</span>` : ''}
+          </div>`;
+        }).join('');
+
+    document.getElementById('guildDetailLoading').outerHTML = `
+      <div class="card guild-detail-header">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="font-size:48px">${g.icon || '🏰'}</div>
+          <div style="flex:1">
+            <h2 style="margin:0">${escapeHtml(g.name)}</h2>
+            <div style="color:#6b7280;margin-top:4px">${escapeHtml(g.description || '暂无简介')}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:20px;font-weight:600">👥 ${g.memberCount || 0}</div>
+            <div style="font-size:12px;color:#6b7280">成员</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+          ${myStatus}
+          ${isMember && myRole !== 'owner' ? `<button class="ghost danger-style" onclick="leaveGuild(${g.id})" style="color:#dc2626">退出公会</button>` : ''}
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">👥 成员列表（${members.length}）</h3>
+        <div class="guild-member-list">${membersHtml}</div>
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById('guildDetailLoading').innerHTML = `<div class="card">❌ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// 申请加入公会
+window.applyJoinGuild = async function applyJoinGuild(id) {
+  if (!api.isLoggedIn()) { alert('请先登录'); location.hash = 'login'; return; }
+  const reason = prompt('申请理由（可选）', '');
+  try {
+    const r = await api.guilds.apply(id, reason);
+    if (r.success) alert('✅ 申请已提交，请等待审批');
+    else alert('申请失败：' + (r.message || '未知错误'));
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+
 // ==================== 路由入口 ====================
 function route() {
   const raw = (location.hash || '').slice(1);
@@ -3774,6 +4445,8 @@ function route() {
   else if (path === 'calendar') renderCalendar(app);
   else if (path === 'about') renderAbout(app);
   else if (path === 'admin') renderAdmin(app);
+  else if (path === 'guilds') renderGuilds(app);
+  else if (path === 'guild' && seg2) renderGuildDetail(app, parseInt(seg2, 10));
   else if (path === 'forum') renderForum(app);
   else renderCover(app);
 }
