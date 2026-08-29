@@ -514,6 +514,46 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 .nav-avatar { width: 30px; height: 30px; font-size: 14px; }
 .post-avatar { width: 22px; height: 22px; font-size: 11px; }
 
+/* ---- 超小头像（评论区）---- */
+.avatar-xs {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; display: inline-flex; align-items: center; justify-content: center;
+  color: #0071e3; font-weight: 700; font-size: 10px; flex-shrink: 0;
+  overflow: hidden; position: relative;
+}
+.avatar-xs .avatar-initials { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.avatar-xs .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---- 等级徽章（帖子卡 + 评论区通用）---- */
+.level-badge {
+  font-size: 10px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  padding: 1px 6px; border-radius: 8px; line-height: 1.4; white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(249,115,22,.25);
+  vertical-align: middle;
+}
+.level-badge.admin {
+  background: linear-gradient(135deg, #dc2626, #f59e0b);
+  box-shadow: 0 1px 3px rgba(220,38,38,.4);
+}
+
+/* ---- 帖子作者区域 ---- */
+.post-author { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.post-author-name { font-size: 13px; color: #374151; font-weight: 500; }
+
+/* ---- 评论作者区域 ---- */
+.comment-author-info {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  color: inherit; text-decoration: none;
+}
+.comment-author-info:hover { color: #0071e3; }
+.comment-avatar { margin-right: 2px; }
+.comment-author { font-weight: 500; color: #374151; }
+
+/* 紧凑卡片作者信息 */
+.wfall-author { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.wfall-author:hover { color: #0071e3; }
+
 /* ---- 顶栏所在区域徽标（依据 UID 推断，头像左侧）---- */
 .nav-region { font-size: 11px; color: #374151; background: #f3f4f6; padding: 2px 8px; border-radius: 10px; white-space: nowrap; line-height: 1.4; }
 .nav-region-select { font-size: 11px; color: #374151; background: #f3f4f6; padding: 2px 6px; border-radius: 10px; border: 1px solid #e5e7eb; line-height: 1.4; cursor: pointer; max-width: 130px; }

@@ -59,6 +59,7 @@ function mapPostRow(row) {
     authorNickname: row.author_nickname || null,
     authorRole: row.author_role || null,
     authorAvatarUrl: row.author_avatar_url || null,
+    authorExpPoints: row.author_exp_points != null ? Number(row.author_exp_points) : 0,
     authorUpdatedAt: row.author_updated_at || null,
     category: row.category,
     tags: parseTags(row.tags),
@@ -149,7 +150,7 @@ posts.get('/', async (c) => {
 
     const rows = await db
       .prepare(
-        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role, u.avatar_url AS author_avatar_url, u.updated_at AS author_updated_at
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role, u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points, u.updated_at AS author_updated_at
          FROM posts p
          LEFT JOIN users u ON u.uid = p.author_uid
          WHERE ${whereSQL}
@@ -265,6 +266,7 @@ posts.get('/:id', async (c) => {
        RETURNING *, (SELECT nickname FROM users WHERE uid = author_uid) AS author_nickname,
                     (SELECT role FROM users WHERE uid = author_uid) AS author_role,
                     (SELECT avatar_url FROM users WHERE uid = author_uid) AS author_avatar_url,
+                    (SELECT exp_points FROM users WHERE uid = author_uid) AS author_exp_points,
                     (SELECT updated_at FROM users WHERE uid = author_uid) AS author_updated_at`
     )
     .bind(id)
@@ -402,7 +404,9 @@ posts.post('/', requireAuth(), async (c) => {
 
     const created = await db
       .prepare(
-        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role,
+                u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points,
+                u.updated_at AS author_updated_at
          FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
       )
       .bind(postId)
@@ -477,7 +481,9 @@ posts.put('/:id', requireAuth(), async (c) => {
 
     const updated = await db
       .prepare(
-        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role
+        `SELECT p.*, u.nickname AS author_nickname, u.role AS author_role,
+                u.avatar_url AS author_avatar_url, u.exp_points AS author_exp_points,
+                u.updated_at AS author_updated_at
          FROM posts p LEFT JOIN users u ON u.uid = p.author_uid WHERE p.id = ?`
       )
       .bind(id)

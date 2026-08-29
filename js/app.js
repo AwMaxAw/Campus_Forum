@@ -302,7 +302,9 @@ function postCard(p, opts = {}) {
   const time = formatTime(p.createdAt);
   // 作者公开资料（头像+昵称）：点头像或昵称进作者主页，stopPropagation 防触发卡片跳详情
   const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
-  const authorHtml = `<span class="post-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(authorUser)}</span><span class="post-author-name">${escapeHtml(author)}</span></span>`;
+  const authorLevel = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const levelBadge = `<span class="level-badge${authorLevel.isAdmin ? ' admin' : ''}">Lv.${authorLevel.level}</span>`;
+  const authorHtml = `<span class="post-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(authorUser)}</span><span class="post-author-name">${escapeHtml(author)}</span>${levelBadge}</span>`;
   const tags = (Array.isArray(p.tags) && p.tags.length)
     ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
          ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${escapeHtml(JSON.stringify(t))})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
@@ -1282,6 +1284,14 @@ function postCardCompact(p) {
     : '';
   const pinnedBadge = p.isPinned ? `<span class="wfall-pinned">📌 置顶</span>` : '';
   const catBadge = categoryBadgeHtml(p.category, { compact: true });
+  // 作者头像+昵称+Lv
+  const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt };
+  const lvlInfo = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const authorMeta = `<span class="wfall-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'">
+    <span class="avatar-xs">${buildAvatarInner(authorUser)}</span>
+    <span>${escapeHtml(p.authorNickname || ('用户' + p.authorUid))}</span>
+    <span class="level-badge${lvlInfo.isAdmin ? ' admin' : ''}">Lv.${lvlInfo.level}</span>
+  </span>`;
   return `
     <div class="wfall-card" data-post-id="${p.id}" onclick="location.hash='#detail/${p.id}'" title="查看详情">
       ${pinnedBadge}
@@ -1290,7 +1300,7 @@ function postCardCompact(p) {
         <h4>${title}</h4>
         <div class="wfall-meta">
           ${catBadge}
-          <span>${escapeHtml(p.authorNickname || ('用户' + p.authorUid))}</span>
+          ${authorMeta}
         </div>
         ${tags}
         <div class="wfall-stats">
@@ -1749,9 +1759,11 @@ async function renderDetail(app, postId) {
        </div>`
     : '';
 
-  // 作者可点击进主页（头像+昵称）
+  // 作者可点击进主页（头像+昵称+Lv）
   const detailAuthorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
-  const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span></span>`;
+  const detailAuthorLevel = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const detailLevelBadge = `<span class="level-badge${detailAuthorLevel.isAdmin ? ' admin' : ''}">Lv.${detailAuthorLevel.level}</span>`;
+  const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>${detailLevelBadge}</span>`;
 
   app.innerHTML = `
     <div style="margin-bottom:10px">
@@ -1965,15 +1977,29 @@ async function loadAndRenderComments(postId) {
     const replyRef = (isReply && c.replyToId && byId.has(c.replyToId))
       ? `<div class="reply-ref">回复 <b>@${escapeHtml(c.replyToAuthorNickname || '已删除用户')}</b>：</div>`
       : '';
-    const headerAuthor = deleted ? `已删除用户` : escapeHtml(c.authorNickname || `用户${c.authorUid}`);
     const canReply = me && !deleted;
     const canDelete = me && !deleted && (me.uid === c.authorUid || me.role === 'ops_admin');
     const canEdit = me && !deleted && (me.role === 'ops_admin');
 
+    // 评论作者信息（头像+昵称+Lv）
+    let headerLeft;
+    if (deleted) {
+      headerLeft = `<span class="comment-author">已删除用户</span>`;
+    } else {
+      const authorLevel = api.getLevelInfo(c.authorExpPoints, c.authorRole);
+      const authorUser = { uid: c.authorUid, nickname: c.authorNickname, avatarUrl: c.authorAvatarUrl, createdAt: c.createdAt };
+      const lvlBadge = `<span class="level-badge${authorLevel.isAdmin ? ' admin' : ''}">Lv.${authorLevel.level}</span>`;
+      headerLeft = `<span class="comment-author-info" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(c.authorUid)}'">
+        <span class="avatar-xs comment-avatar">${buildAvatarInner(authorUser)}</span>
+        <span class="comment-author">${escapeHtml(c.authorNickname || `用户${c.authorUid}`)}</span>
+        ${lvlBadge}
+      </span>`;
+    }
+
     return `
       <div class="comment-item ${isReply ? 'reply' : ''}" data-comment-id="${c.id}">
         <div class="comment-header">
-          <span><span class="comment-author">${headerAuthor}</span> · ${escapeHtml(formatTime(c.createdAt))}</span>
+          <span>${headerLeft} · ${escapeHtml(formatTime(c.createdAt))}</span>
           ${canDelete ? `<button class="ghost danger-style" onclick="deleteComment(${c.id}, ${postId})" style="color:#ff3b30;background:none">删除</button>` : ''}
           ${canEdit ? `<button class="ghost" onclick="toggleEditComment(${c.id})" style="color:#2563eb;background:none">编辑</button>` : ''}
         </div>

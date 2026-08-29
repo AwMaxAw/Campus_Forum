@@ -42,6 +42,8 @@ function mapCommentRow(row) {
     authorUid: row.author_uid,
     authorNickname: row.author_nickname || null,
     authorRole: row.author_role || null,
+    authorAvatarUrl: row.author_avatar_url || null,
+    authorExpPoints: row.author_exp_points != null ? Number(row.author_exp_points) : 0,
     content: row.is_hidden ? null : row.content,  // 被软删的内容不给前端
     replyToId: row.reply_to_id,
     replyToAuthorNickname: row.reply_to_author_nickname || null,
@@ -63,6 +65,8 @@ comments.get('/', async (c) => {
       `SELECT c.*,
               u.nickname AS author_nickname,
               u.role AS author_role,
+              u.avatar_url AS author_avatar_url,
+              u.exp_points AS author_exp_points,
               ru.nickname AS reply_to_author_nickname
        FROM comments c
        LEFT JOIN users u ON u.uid = c.author_uid
@@ -135,6 +139,8 @@ comments.post('/', requireAuth(), async (c) => {
       `SELECT c.*,
               u.nickname AS author_nickname,
               u.role AS author_role,
+              u.avatar_url AS author_avatar_url,
+              u.exp_points AS author_exp_points,
               ru.nickname AS reply_to_author_nickname
        FROM comments c
        LEFT JOIN users u ON u.uid = c.author_uid
