@@ -1090,18 +1090,25 @@ window._togglePinned = function _togglePinned() {
   }
 };
 // 折叠态单条置顶帖：第一次点击展开为完整卡片（带右下角折叠按钮 + allowClick 再点一次即进详情页）
+// 用 setTimeout 延迟 outerHTML 替换，避免在当前 click 事件中替换后新元素被同一事件触发（导致要点两次）
 window._expandPinned = function _expandPinned(id) {
-  const row = document.getElementById(`pinnedRow-${id}`);
   const data = (window._pinnedData || []).find(p => p.id === id);
-  if (!row || !data) return;
-  row.outerHTML = postCard(data, { allowClick: true, foldId: id });
+  if (!data) return;
+  const html = postCard(data, { allowClick: true, foldId: id });
+  setTimeout(() => {
+    const row = document.getElementById(`pinnedRow-${id}`);
+    if (row) row.outerHTML = html;
+  }, 0);
 };
 // 展开态单条置顶帖右下角"折叠"：把完整卡片折回单行标题形式
 window._foldPinned = function _foldPinned(id) {
-  const card = document.querySelector(`#pinnedSection [data-post-id="${id}"]`);
   const data = (window._pinnedData || []).find(p => p.id === id);
-  if (!card || !data) return;
-  card.outerHTML = pinnedRowHtml(data);
+  if (!data) return;
+  const html = pinnedRowHtml(data);
+  setTimeout(() => {
+    const card = document.querySelector(`#pinnedSection [data-post-id="${id}"]`);
+    if (card) card.outerHTML = html;
+  }, 0);
 };
 // 标题行右侧"全部折叠"：隐藏整体展开区，显示折叠区并重置其中所有行（恢复被单条展开的）
 window._foldAllPinned = function _foldAllPinned() {
