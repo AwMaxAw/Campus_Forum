@@ -2819,21 +2819,104 @@ async function renderMessages(app, autoPeerUid, autoPeerName) {
     const r = await api.messages.conversations();
     const host = document.getElementById('convList');
     if (!r.success) { host.innerHTML = `<div style="padding:12px;color:#ff3b30">❌ ${escapeHtml(r.message)}</div>`; return; }
-    const list = r.data || [];
-    if (list.length === 0) {
-      host.innerHTML = `<div class="empty" style="padding:30px">还没有任何对话<br>在上方输入对方 UID 即可发起</div>`;
-      return;
+    let list = r.data || [];
+
+    // 把当前用户 UID 做成对象，方便构建会话项（含头像/等级/昵称/公会）
+    const me = api.getCurrentUser();
+
+    // ---------- 固定置顶：运维管理员（UID 00000001）----------
+    // 如果当前有真的和运维的对话，把它取出来当 pinned；否则合成一个 pinned 占位项
+    const ADMIN_UID = '00000001';
+    let pinnedAdmin = null;
+    const restList = [];
+    for (const c of list) {
+      if (c.otherUid === ADMIN_UID) pinnedAdmin = c;
+      else restList.push(c);
     }
-    host.innerHTML = list.map(c => {
-      const last = c.lastMessage ? c.lastMessage.content : '（暂无消息）';
+    list = restList;
+
+    // 只有当我不是运维管理员时才显示运维管理员置顶
+    if (me && me.uid !== ADMIN_UID) {
+      if (!pinnedAdmin) {
+        // 没聊过，合成一个占位项：用 api.users.getProfile 查一下管理员的昵称和资料
+        try {
+          const pr = await api.users.getProfile(ADMIN_UID);
+          if (pr && pr.success && pr.data) {
+            pinnedAdmin = {
+              otherUid: ADMIN_UID,
+              otherNickname: pr.data.nickname || '运维管理员',
+              otherRole: pr.data.role || 'ops_admin',
+              otherAvatarUrl: pr.data.avatarUrl || null,
+              otherExpPoints: Number(pr.data.expPoints || 0),
+              otherGuildId: pr.data.guildId || null,
+              otherGuildName: pr.data.guildName || null,
+              otherGuildIcon: pr.data.guildIcon || null,
+              lastMessage: null,
+              unreadCount: 0,
+              _isAdminPinned: true,
+            };
+          } else {
+            pinnedAdmin = {
+              otherUid: ADMIN_UID,
+              otherNickname: '运维管理员',
+              otherRole: 'ops_admin',
+              otherAvatarUrl: null,
+              otherExpPoints: 0,
+              otherGuildId: null,
+              otherGuildName: null,
+              otherGuildIcon: null,
+              lastMessage: null,
+              unreadCount: 0,
+              _isAdminPinned: true,
+            };
+          }
+        } catch {
+          pinnedAdmin = {
+            otherUid: ADMIN_UID, otherNickname: '运维管理员', otherRole: 'ops_admin',
+            otherAvatarUrl: null, otherExpPoints: 0, otherGuildId: null, otherGuildName: null, otherGuildIcon: null,
+            lastMessage: null, unreadCount: 0, _isAdminPinned: true,
+          };
+        }
+      }
+    }
+
+    // 渲染单个会话项：左边头像，右边 昵称+公会+LV / 最后消息预览，右上角未读红点
+    function buildConvItem(c, isPinned) {
+      const last = c.lastMessage ? c.lastMessage.content : (isPinned ? '📮 点击联系官方运维管理员' : '（暂无消息）');
       const badge = c.unreadCount ? `<span class="unread-badge">${c.unreadCount}</span>` : '';
-      return `<div class="conv-item" onclick="openConversation('${escapeHtml(c.otherUid)}')" data-uid="${escapeHtml(c.otherUid)}">
+      const pinnedTag = isPinned ? `<span class="pinned-badge">📌</span>` : '';
+      const authorObj = {
+        avatarUrl: c.otherAvatarUrl, nickname: c.otherNickname,
+        expPoints: c.otherExpPoints || 0,
+        guildId: c.otherGuildId, guildName: c.otherGuildName, guildIcon: c.otherGuildIcon,
+        authorExpPoints: c.otherExpPoints || 0,
+        authorGuildId: c.otherGuildId, authorGuildName: c.otherGuildName, authorGuildIcon: c.otherGuildIcon,
+      };
+      const levelHtml = levelBadge(authorObj, /*compact*/ true);
+      return `<div class="conv-item ${isPinned ? 'conv-pinned' : ''}" onclick="openConversation('${escapeHtml(c.otherUid)}')" data-uid="${escapeHtml(c.otherUid)}">
+        <span class="avatar-sm" style="flex-shrink:0">${buildAvatarInner(authorObj)}</span>
         <div style="min-width:0;flex:1">
-          <div class="conv-name">${escapeHtml(c.otherNickname)} ${badge}</div>
+          <div class="conv-name" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+            ${pinnedTag}
+            <span style="flex-shrink:0">${escapeHtml(c.otherNickname)}</span>
+            ${levelBadge(authorObj, true)}
+            ${guildBadge(authorObj)}
+            ${roleBadgeInline(c.otherRole)}
+            ${badge}
+          </div>
           <div class="conv-preview">${escapeHtml(last.slice(0, 24))}</div>
         </div>
       </div>`;
-    }).join('');
+    }
+
+    const parts = [];
+    if (pinnedAdmin) parts.push(buildConvItem(pinnedAdmin, true));
+    if (list.length === 0 && !pinnedAdmin) {
+      host.innerHTML = `<div class="empty" style="padding:30px">还没有任何对话<br>在上方输入对方 UID 即可发起</div>`;
+      return;
+    }
+    parts.push(...list.map(c => buildConvItem(c, false)));
+    host.innerHTML = parts.join('');
   } catch (e) {
     document.getElementById('convList').innerHTML = `<div style="padding:12px;color:#ff3b30">❌ ${escapeHtml(e.message)}</div>`;
   }

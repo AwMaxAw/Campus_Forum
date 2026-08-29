@@ -89,7 +89,16 @@ messages.get('/conversations', requireAuth(), async (c) => {
 
     const list = [];
     for (const otherUid of pairs) {
-      const otherUser = await db.prepare('SELECT nickname, role FROM users WHERE uid = ?').bind(otherUid).first();
+      const otherUser = await db
+        .prepare(
+          `SELECT u.nickname, u.role, u.avatar_url, u.exp_points,
+                  gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
+           FROM users u
+           LEFT JOIN guild_members gm ON gm.uid = u.uid
+           LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
+           WHERE u.uid = ?`
+        )
+        .bind(otherUid).first();
       const lastMsg = await db
         .prepare(
           `SELECT * FROM messages
@@ -104,6 +113,11 @@ messages.get('/conversations', requireAuth(), async (c) => {
         otherUid,
         otherNickname: (otherUser && otherUser.nickname) || `用户${otherUid}`,
         otherRole: (otherUser && otherUser.role) || null,
+        otherAvatarUrl: (otherUser && otherUser.avatar_url) || null,
+        otherExpPoints: Number(otherUser && otherUser.exp_points || 0),
+        otherGuildId: (otherUser && otherUser.guild_id) || null,
+        otherGuildName: (otherUser && otherUser.guild_name) || null,
+        otherGuildIcon: (otherUser && otherUser.guild_icon) || null,
         lastMessage: lastMsg ? {
           id: lastMsg.id,
           fromUid: lastMsg.from_uid,
