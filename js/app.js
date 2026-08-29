@@ -2321,8 +2321,8 @@ function buildUserRow(u, myUid, myRole) {
   const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
 
   return `<tr>
-    <td>${escapeHtml(u.uid)}</td>
-    <td>${escapeHtml(u.nickname)}${selfTag}</td>
+    <td><a href="#user/${escapeHtml(u.uid)}" style="color:#2563eb;text-decoration:none">${escapeHtml(u.uid)}</a></td>
+    <td><a href="#user/${escapeHtml(u.uid)}" style="color:inherit;text-decoration:none">${escapeHtml(u.nickname)}</a>${selfTag}</td>
     <td>${roleText}</td>
     <td>${u.postCount || 0}</td>
     <td>${escapeHtml(formatTime(u.createdAt))}</td>
