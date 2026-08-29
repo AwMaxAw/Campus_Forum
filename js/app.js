@@ -3647,7 +3647,7 @@ async function renderAdminUsers(host) {
           <div style="overflow-x:auto">
             <table class="admin-table">
               <thead><tr>
-                <th>UID</th><th>昵称</th><th>角色</th><th>等级</th><th>积分</th><th>帖子数</th>
+                <th>UID</th><th>昵称</th><th>公会</th><th>角色</th><th>等级</th><th>积分</th><th>帖子数</th>
                 <th>注册时间</th><th>最后登录</th><th>状态</th><th>操作</th>
               </tr></thead>
               <tbody>
@@ -3760,9 +3760,14 @@ function buildUserRow(u, myUid, myRole) {
     : `Lv.${levelInfo.level}`;
   const expBtn = `<button class="btn-mini" style="background:#3b82f6;color:#fff" data-act="adjust-exp" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-exp="${Number(u.expPoints || 0)}">调整积分</button>`;
 
+  const guildCell = (u.guildId && u.guildName)
+    ? `${guildBadge(u)}`
+    : `<span class="hint" style="margin:0">没有</span>`;
+
   return `<tr>
     <td><a href="#user/${escapeHtml(u.uid)}" style="color:#2563eb;text-decoration:none">${escapeHtml(u.uid)}</a></td>
     <td><a href="#user/${escapeHtml(u.uid)}" style="color:inherit;text-decoration:none">${escapeHtml(u.nickname)}</a>${selfTag}</td>
+    <td>${guildCell}</td>
     <td>${roleText}</td>
     <td>${levelBadge}</td>
     <td>${Number(u.expPoints || 0)}</td>

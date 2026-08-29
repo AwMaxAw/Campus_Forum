@@ -76,8 +76,11 @@ admin.get('/users', requireAdmin(), async (c) => {
       .prepare(
         `SELECT u.uid, u.nickname, u.role, u.bio, u.avatar_url, u.created_at,
                 u.is_banned, u.last_login_at, u.exp_points,
-                (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count
+                (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count,
+                gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
          FROM users u
+         LEFT JOIN guild_members gm ON gm.uid = u.uid
+         LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
          ORDER BY u.created_at ASC`
       )
       .all();
@@ -92,6 +95,9 @@ admin.get('/users', requireAdmin(), async (c) => {
       lastLoginAt: r.last_login_at || null,
       postCount: r.post_count || 0,
       expPoints: Number(r.exp_points || 0),
+      guildId: r.guild_id || null,
+      guildName: r.guild_name || null,
+      guildIcon: r.guild_icon || null,
     }));
     return c.json(ok(data, { total: data.length }));
   } catch (e) {
