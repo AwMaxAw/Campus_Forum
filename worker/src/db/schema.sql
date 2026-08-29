@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   uid TEXT PRIMARY KEY,
   password_hash TEXT NOT NULL,
   nickname TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'member',      -- member / admin / dev_admin
+  role TEXT NOT NULL DEFAULT 'member',      -- member / ops_admin（运维管理员）
   avatar_url TEXT,
   bio TEXT,                                -- 简介
   is_banned INTEGER NOT NULL DEFAULT 0,    -- 0/1，是否被管理员封禁（封禁后无法登录）
@@ -146,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_images_author ON images(author_uid);
 --     （见 worker/src/utils/auth.js hashPassword / verifyPassword）
 --   - 每次生成的 salt 不同，所以 hash 不能静态写死在 schema.sql 里。
 --   - 真实部署步骤（任选其一）：
---       A) 注册一个普通账号，之后用 wrangler d1 execute 把它 UPDATE 成 dev_admin。
+--       A) 注册一个普通账号，之后用 wrangler d1 execute 把它 UPDATE 成 ops_admin。
 --       B) 用下面这条 node 命令生成你想要的密码的 hash，再把 INSERT 里的
 --          <GENERATED_PBKDF2_HASH> 替换掉：
 --          node -e "const {pbkdf2Sync,randomBytes}=require('crypto');\
@@ -157,7 +157,7 @@ INSERT OR IGNORE INTO users (uid, password_hash, nickname, role) VALUES (
   '00000000',
   '<GENERATED_PBKDF2_HASH_OF_admin123>',
   '系统管理员',
-  'dev_admin'
+  'ops_admin'
 );
 
 -- 两条欢迎帖（作者 00000000）

@@ -3,7 +3,7 @@
  *
  * POST   /api/images              上传图片（JSON body: { image: "data:image/png;base64,...", filename?: "xxx.png" }）
  * GET    /api/images/:id          获取图片（返回二进制，带正确 Content-Type）
- * DELETE /api/images/:id          删除图片（JWT：上传者本人 或 admin/dev_admin）
+ * DELETE /api/images/:id          删除图片（JWT：上传者本人 或 ops_admin（运维管理员））
  * GET    /api/images/post/:postId 获取某帖子的全部图片（返回 JSON 列表，不含 data）
  */
 
@@ -169,7 +169,7 @@ images.get('/:id', async (c) => {
   });
 });
 
-// ==================== 删除图片（JWT：上传者本人 或 admin/dev_admin）====================
+// ==================== 删除图片（JWT：上传者本人 或 ops_admin（运维管理员））====================
 images.delete('/:id', requireAuth(), async (c) => {
   try {
     const id = parseInt(c.req.param('id'), 10);
@@ -187,7 +187,7 @@ images.delete('/:id', requireAuth(), async (c) => {
       .first();
     if (!row) return fail('图片不存在', 404);
 
-    const isAdmin = role === 'admin' || role === 'dev_admin';
+    const isAdmin = role === 'ops_admin';
     if (row.author_uid !== uid && !isAdmin) return fail('没有权限删除该图片', 403);
 
     await db.prepare('DELETE FROM images WHERE id = ?').bind(id).run();

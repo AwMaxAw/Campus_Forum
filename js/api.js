@@ -22,7 +22,7 @@ const API_BASE = (typeof window !== 'undefined' && window.__CAMPUS_FORUM_API_BAS
 
 // 分区枚举（category key 存库 / label 展示 / adminOnly 控制是否仅管理员可见+可选/可筛选）
 // 这个枚举必须与 worker/src/routes/posts.js 的 ALLOWED_CATEGORIES_KEYS 保持一致。
-export const ADMIN_ROLES = new Set(['admin', 'dev_admin']);
+export const ADMIN_ROLES = new Set(['ops_admin']);
 export const CATEGORIES = [
   { key: 'general', label: '综合', cssColor: '#6b7280', description: '没明确归属的日常讨论' },
   { key: 'study',   label: '学习', cssColor: '#2563eb', description: '学习交流、作业、题目、考试经验' },

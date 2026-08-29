@@ -5,7 +5,7 @@
  * GET    /api/posts/tags/popular 热门标签榜（用于首页搜索条推荐）
  * GET    /api/posts/:id          帖子详情（view_count += 1，附带作者信息 + 当前用户点赞/收藏）
  * POST   /api/posts              发新帖（JWT，支持多标签 tags 数组，不传 category 则默认 general）
- * DELETE /api/posts/:id          删帖（JWT，作者本人 或 admin/dev_admin）
+ * DELETE /api/posts/:id          删帖（JWT，作者本人 或 ops_admin（运维管理员））
  */
 
 import { Hono } from 'hono';
@@ -32,7 +32,7 @@ function requireAuth() {
 
 // 分区白名单（必须与前端 js/api.js CATEGORIES.key 完全一致，避免映射不一致）
 const ALLOWED_CATEGORIES_KEYS = ['general', 'study', 'club', 'life', 'meta'];
-const ADMIN_ROLES = new Set(['admin', 'dev_admin']);
+const ADMIN_ROLES = new Set(['ops_admin']);
 
 // 目前 tags 在 DB 里存的是逗号分隔字符串（a,b,c），前后端都按数组来用
 function parseTags(str) {
@@ -343,7 +343,7 @@ posts.post('/', requireAuth(), async (c) => {
   }
 });
 
-// ==================== 编辑帖子（JWT：仅 admin/dev_admin）====================
+// ==================== 编辑帖子（JWT：仅 ops_admin（运维管理员））====================
 posts.put('/:id', requireAuth(), async (c) => {
   try {
     const id = parseInt(c.req.param('id'), 10);
@@ -352,7 +352,7 @@ posts.put('/:id', requireAuth(), async (c) => {
     const payload = c.get('jwtPayload');
     const uid = payload && payload.sub;
     const role = payload && payload.role;
-    const isAdmin = role === 'admin' || role === 'dev_admin';
+    const isAdmin = role === 'ops_admin';
     if (!isAdmin) return fail('只有管理员才能编辑帖子', 403);
 
     let body;
@@ -418,7 +418,7 @@ posts.put('/:id', requireAuth(), async (c) => {
   }
 });
 
-// ==================== 删帖（JWT：作者本人 或 admin/dev_admin）====================
+// ==================== 删帖（JWT：作者本人 或 ops_admin（运维管理员））====================
 posts.delete('/:id', requireAuth(), async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   if (!Number.isFinite(id) || id <= 0) return fail('帖子 ID 无效');
@@ -431,7 +431,7 @@ posts.delete('/:id', requireAuth(), async (c) => {
   const post = await db.prepare('SELECT * FROM posts WHERE id = ?').bind(id).first();
   if (!post) return fail('帖子不存在', 404);
 
-  const isAdmin = role === 'admin' || role === 'dev_admin';
+  const isAdmin = role === 'ops_admin';
   if (post.author_uid !== uid && !isAdmin) return fail('没有权限删除该帖子', 403);
 
   // 软删除：is_hidden = 1，不物理删
@@ -442,7 +442,7 @@ posts.delete('/:id', requireAuth(), async (c) => {
   return c.json(ok({ id, hidden: true }));
 });
 
-// ==================== 置顶/取消置顶（JWT：仅 admin/dev_admin）====================
+// ==================== 置顶/取消置顶（JWT：仅 ops_admin（运维管理员））====================
 posts.patch('/:id/pin', requireAuth(), async (c) => {
   try {
     const id = parseInt(c.req.param('id'), 10);
@@ -451,7 +451,7 @@ posts.patch('/:id/pin', requireAuth(), async (c) => {
     const payload = c.get('jwtPayload');
     const uid = payload && payload.sub;
     const role = payload && payload.role;
-    const isAdmin = role === 'admin' || role === 'dev_admin';
+    const isAdmin = role === 'ops_admin';
     if (!isAdmin) return fail('只有管理员才能置顶/取消置顶帖子', 403);
 
     let body;

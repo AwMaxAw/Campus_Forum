@@ -1,5 +1,5 @@
 /**
- * 管理员面板路由（仅 admin / dev_admin）
+ * 运维管理员面板路由（仅 ops_admin）
  *
  *   GET    /api/admin/users            列出所有已注册账号（含每用户帖子数 + 最后登录 + 封禁状态）
  *   GET    /api/admin/pinned-posts     列出所有置顶帖（按 pin_order 升序）
@@ -31,15 +31,15 @@ function requireAuth() {
     return mw(c, next);
   });
 }
-// 管理员专属：JWT 通过后再校验角色
+// 运维管理员专属：JWT 通过后再校验角色
 function requireAdmin() {
   return createMiddleware(async (c, next) => {
     const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
     await mw(c, async () => {});
     const payload = c.get('jwtPayload');
     const role = payload && payload.role;
-    if (role !== 'admin' && role !== 'dev_admin') {
-      return fail('只有管理员才能访问该面板', 403);
+    if (role !== 'ops_admin') {
+      return fail('只有运维管理员才能访问该面板', 403);
     }
     await next();
   });
@@ -107,10 +107,10 @@ admin.post('/users/:uid/ban', requireAdmin(), async (c) => {
     const myUid = payload && payload.sub;
     const myRole = payload && payload.role;
 
-    // 保护：不能封禁自己、不能封禁其他管理员（防止 admin 互封死锁）
+    // 保护：不能封禁自己、不能封禁运维管理员
     if (targetUid === myUid) return fail('不能封禁自己', 400);
-    if ((target.role === 'admin' || target.role === 'dev_admin') && myRole !== 'dev_admin') {
-      return fail('只有开发管理员才能封禁其他管理员', 403);
+    if (target.role === 'ops_admin') {
+      return fail('运维管理员账号不可被封禁', 403);
     }
 
     await db.prepare("UPDATE users SET is_banned = 1, updated_at = datetime('now') WHERE uid = ?").bind(targetUid).run();
@@ -147,14 +147,10 @@ admin.delete('/users/:uid', requireAdmin(), async (c) => {
     const myUid = payload && payload.sub;
     const myRole = payload && payload.role;
 
-    // 保护：不能注销自己、不能注销其他管理员（除非 dev_admin）
+    // 保护：不能注销自己、不能注销其他运维管理员
     if (targetUid === myUid) return fail('不能注销自己', 400);
-    if ((target.role === 'admin' || target.role === 'dev_admin') && myRole !== 'dev_admin') {
-      return fail('只有开发管理员才能注销其他管理员', 403);
-    }
-    // 保护：不允许注销 dev_admin（最高权限账号永远不能被删）
-    if (target.role === 'dev_admin') {
-      return fail('开发管理员账号不可被注销', 403);
+    if (target.role === 'ops_admin') {
+      return fail('运维管理员账号不可被注销', 403);
     }
 
     // 物理删除：连带清理所有关联数据

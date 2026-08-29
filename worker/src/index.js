@@ -34,7 +34,7 @@
  *     GET    /api/announcements/unread             登录后拉未读公告（JWT）
  *     POST   /api/announcements/read/:id          标记某公告已读（JWT）
  *     GET    /api/announcements                   全部公告历史（分页，公开）
- *     POST   /api/announcements                   发新公告（JWT：仅 admin/dev_admin）
+ *     POST   /api/announcements                   发新公告（JWT：仅 ops_admin（运维管理员））
  */
 
 import { Hono } from 'hono';

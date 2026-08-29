@@ -152,7 +152,7 @@ comments.delete('/:id', requireAuth(), async (c) => {
   const comment = await db.prepare('SELECT * FROM comments WHERE id = ?').bind(id).first();
   if (!comment) return fail('评论不存在', 404);
 
-  const isAdmin = role === 'admin' || role === 'dev_admin';
+  const isAdmin = role === 'ops_admin';
   if (comment.author_uid !== uid && !isAdmin) return fail('没有权限删除该评论', 403);
 
   if (!comment.is_hidden) {
@@ -163,7 +163,7 @@ comments.delete('/:id', requireAuth(), async (c) => {
   return c.json(ok({ id, hidden: true }));
 });
 
-// ==================== 编辑评论（JWT：仅 admin/dev_admin）====================
+// ==================== 编辑评论（JWT：仅 ops_admin（运维管理员））====================
 comments.put('/:id', requireAuth(), async (c) => {
   try {
     const id = parseInt(c.req.param('id'), 10);
@@ -171,7 +171,7 @@ comments.put('/:id', requireAuth(), async (c) => {
 
     const payload = c.get('jwtPayload');
     const role = payload && payload.role;
-    const isAdmin = role === 'admin' || role === 'dev_admin';
+    const isAdmin = role === 'ops_admin';
     if (!isAdmin) return fail('只有管理员才能编辑评论', 403);
 
     let body;

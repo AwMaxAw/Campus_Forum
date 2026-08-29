@@ -168,7 +168,7 @@ auth.post('/quick-login', async (c) => {
     if (!user) return fail('用户不存在', 404);
 
     // 只允许管理员角色免密登录
-    if (user.role !== 'dev_admin' && user.role !== 'admin') {
+    if (user.role !== 'ops_admin') {
       return fail('该 UID 不是管理员，不可使用快速登录', 403);
     }
 

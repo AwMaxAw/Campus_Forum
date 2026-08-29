@@ -151,11 +151,9 @@ async function renderTopBar() {
   }
 
   if (loggedIn && me) {
-    const roleBadge = me.role === 'dev_admin'
-      ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">开发管理员</span>`
-      : me.role === 'admin'
-        ? `<span style="color:#b45309;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">管理员</span>`
-        : '';
+    const roleBadge = me.role === 'ops_admin'
+      ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
+      : '';
     nav.innerHTML = `
       <span class="nav-right-group">
         <span class="nav-user" title="我的主页" onclick="location.hash='me'">
@@ -180,7 +178,7 @@ async function renderTopBar() {
 function renderDrawer(loggedIn, me, unreadMsg) {
   const drawerNav = document.getElementById('drawerNav');
   if (!drawerNav) return;
-  const isAdmin = loggedIn && me && (me.role === 'admin' || me.role === 'dev_admin');
+  const isAdmin = loggedIn && me && (me.role === 'ops_admin');
   const items = loggedIn
     ? [
         { label: '首页',     icon: '🏠', hash: 'home' },
@@ -190,7 +188,7 @@ function renderDrawer(loggedIn, me, unreadMsg) {
         { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
         { label: 'FAQ',      icon: '❓', hash: 'faq' },
         { label: '关于本站', icon: 'ℹ️', hash: 'about' },
-        ...(isAdmin ? [{ label: '管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
+        ...(isAdmin ? [{ label: '运维管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
       ]
     : [
         { label: '首页',     icon: '🏠', hash: 'home' },
@@ -696,7 +694,7 @@ function renderFeedbackItem(f) {
     <div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;color:#374151">${escapeHtml(author.nickname || '匿名用户')}</span>
-        ${author.role === 'admin' || author.role === 'dev_admin' ? `<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px">管理员</span>` : ''}
+        ${author.role === 'ops_admin' ? `<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px">运维管理员</span>` : ''}
         <span style="font-size:11px;color:#9ca3af">${escapeHtml(formatTime(f.createdAt))}</span>
       </div>
       <div style="font-size:13px;color:#1f2937;line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(normalizeNewlines(f.content))}</div>
@@ -1272,9 +1270,9 @@ async function renderDetail(app, postId) {
           ${p.isFavorited ? '★ 已收藏' : '☆ 收藏'}
         </button>
         <button class="secondary" onclick="document.getElementById('commentInput').focus()">💬 评论 (${p.commentCount})</button>
-        ${(me && (me.uid === p.authorUid || me.role === 'admin' || me.role === 'dev_admin'))
+        ${(me && (me.uid === p.authorUid || me.role === 'ops_admin'))
           ? `<button id="delPostBtn" class="danger">🗑 删除帖子</button>` : ''}
-        ${(me && (me.role === 'admin' || me.role === 'dev_admin'))
+        ${(me && (me.role === 'ops_admin'))
           ? `<button id="editPostBtn" class="secondary">✏️ 编辑帖子</button>` : ''}
       </div>
     </div>
@@ -1464,8 +1462,8 @@ async function loadAndRenderComments(postId) {
       : '';
     const headerAuthor = deleted ? `已删除用户` : escapeHtml(c.authorNickname || `用户${c.authorUid}`);
     const canReply = me && !deleted;
-    const canDelete = me && !deleted && (me.uid === c.authorUid || me.role === 'admin' || me.role === 'dev_admin');
-    const canEdit = me && !deleted && (me.role === 'admin' || me.role === 'dev_admin');
+    const canDelete = me && !deleted && (me.uid === c.authorUid || me.role === 'ops_admin');
+    const canEdit = me && !deleted && (me.role === 'ops_admin');
 
     return `
       <div class="comment-item ${isReply ? 'reply' : ''}" data-comment-id="${c.id}">
@@ -1578,8 +1576,7 @@ function setAvatarPreviewsSrc(src) {
 }
 // 角色徽章（个人主页 header 用）
 function roleBadgeInline(role) {
-  if (role === 'dev_admin') return ' <span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">开发管理员</span>';
-  if (role === 'admin') return ' <span style="background:#fef3c7;color:#b45309;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">管理员</span>';
+  if (role === 'ops_admin') return ' <span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">运维管理员</span>';
   return '';
 }
 // 资料变更后局部刷新：个人主页顶部 header（头像+昵称+简介）+ 编辑表单预览 + 顶栏昵称
@@ -1984,13 +1981,13 @@ let _adminPinOrder = [];   // 当前顺序：帖子 id 数组（操作后可能�
 
 async function renderAdmin(app) {
   const me = api.getCurrentUser();
-  if (!api.isLoggedIn() || (me && me.role !== 'admin' && me.role !== 'dev_admin')) {
-    app.innerHTML = `<div class="card">⛔ 仅管理员可访问该面板。<br><a href="#login">去登录</a> 或 <a href="#forum">返回广场</a></div>`;
+  if (!api.isLoggedIn() || (me && me.role !== 'ops_admin')) {
+    app.innerHTML = `<div class="card">⛔ 仅运维管理员可访问该面板。<br><a href="#login">去登录</a> 或 <a href="#forum">返回广场</a></div>`;
     return;
   }
 
   app.innerHTML = `
-    <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#b45309">🛡 管理员面板</span></div>
+    <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#dc2626">🛡 运维管理员面板</span></div>
 
     <!-- 板块1：已注册账号（按 UID 分组） -->
     <div class="card">
@@ -2300,11 +2297,10 @@ async function renderAdminUsers(host) {
 // 构建单个用户表格行（两个分组共用，避免重复代码）
 function buildUserRow(u, myUid, myRole) {
   const isMe = u.uid === myUid;
-  const isDevAdmin = u.role === 'dev_admin';
-  const isAdmin = u.role === 'admin' || isDevAdmin;
-  const canBan    = !isMe && (!isAdmin || myRole === 'dev_admin');
-  const canUnban  = !isMe && u.isBanned && (!isAdmin || myRole === 'dev_admin');
-  const canDelete = !isMe && !isDevAdmin && (!isAdmin || myRole === 'dev_admin');
+  const isOpsAdmin = u.role === 'ops_admin';
+  const canBan    = !isMe && !isOpsAdmin;
+  const canUnban  = !isMe && u.isBanned && !isOpsAdmin;
+  const canDelete = !isMe && !isOpsAdmin;
 
   const banBtn = u.isBanned
     ? (canUnban
@@ -2321,7 +2317,7 @@ function buildUserRow(u, myUid, myRole) {
     ? `<span class="status-badge status-banned">已封禁</span>`
     : `<span class="status-badge status-normal">正常</span>`;
   const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
-  const roleText = isDevAdmin ? '开发管理员' : isAdmin ? '管理员' : '普通成员';
+  const roleText = isOpsAdmin ? '运维管理员' : '普通成员';
   const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
 
   return `<tr>

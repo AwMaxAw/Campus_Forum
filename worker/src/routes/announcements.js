@@ -4,7 +4,7 @@
  * GET  /api/announcements              公告历史（公开，分页，按时间倒序）
  * GET  /api/announcements/unread       "我还有哪些没读的公告"（JWT）→ 返回未读列表，前端弹窗一条条展示
  * POST /api/announcements/read/:id     标记某公告"我已读"（JWT）
- * POST /api/announcements              发新公告（仅 admin / dev_admin，body: { title, content, is_pinned? }）
+ * POST /api/announcements              发新公告（仅 ops_admin（运维管理员），body: { title, content, is_pinned? }）
  */
 
 import { Hono } from 'hono';
@@ -106,13 +106,13 @@ announcements.post('/read/:id', requireAuth(), async (c) => {
   return c.json(ok({ read: true }));
 });
 
-// ==================== 发新公告（仅 admin / dev_admin） ====================
+// ==================== 发新公告（仅 ops_admin（运维管理员）） ====================
 announcements.post('/', requireAuth(), async (c) => {
   const payload = c.get('jwtPayload');
   const uid = payload && payload.sub;
   const role = payload && payload.role;
   if (!uid) return fail('需要登录', 401);
-  const isAdmin = role === 'admin' || role === 'dev_admin';
+  const isAdmin = role === 'ops_admin';
   if (!isAdmin) return fail('只有管理员才能发公告', 403);
 
   let body;
