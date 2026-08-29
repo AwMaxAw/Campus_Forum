@@ -1017,12 +1017,12 @@ async function renderForum(app) {
           <div class="forum-view-title">🎨 广场展示设置</div>
           <div class="forum-view-btns">
             <button id="viewModeCards" class="forum-view-btn" data-mode="cards" onclick="setForumView('cards')">
-              <span class="forum-view-icon">🟦🟦</span>
-              <span>卡片瀑布流</span>
+              <span class="forum-view-icon">🟦</span>
+              <span>卡片</span>
             </button>
             <button id="viewModeList" class="forum-view-btn" data-mode="list" onclick="setForumView('list')">
               <span class="forum-view-icon">▤</span>
-              <span>列表视图</span>
+              <span>列表</span>
             </button>
           </div>
         </div>
