@@ -517,6 +517,8 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 /* ---- 顶栏所在区域徽标（依据 UID 推断，头像左侧）---- */
 .nav-region { font-size: 11px; color: #374151; background: #f3f4f6; padding: 2px 8px; border-radius: 10px; white-space: nowrap; line-height: 1.4; }
 .nav-region-select { font-size: 11px; color: #374151; background: #f3f4f6; padding: 2px 6px; border-radius: 10px; border: 1px solid #e5e7eb; line-height: 1.4; cursor: pointer; max-width: 130px; }
+/* "其他"账号徽标：区别于标准分区徽标，放在下拉框右侧 */
+.nav-region-other { color: #92400e; background: #fef3c7; margin-left: 4px; }
 
 /* ---- 顶栏用户区（头像+昵称）可点击进「我的」---- */
 .nav-user { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 6px; border-radius: 8px; transition: background .15s; }

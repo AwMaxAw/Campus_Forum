@@ -185,7 +185,7 @@ async function renderTopBar() {
       ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
       : '';
     // 标准账号（2611/2612/2621/2622）锁定本分区，显示固定徽标；
-    // "其他"账号（管理员/非标准 UID）在头像左侧用下拉框切换查看任意分区
+    // "其他"账号（管理员/非标准 UID）显示"其他"徽标，左侧附下拉框切换查看任意分区
     const myPrefix = uidToRegionPrefix(me.uid);
     const regionEl = myPrefix
       ? `<span class="nav-region" title="所在区域（依据 UID 推断）">${escapeHtml(uidToRegion(me.uid))}</span>`
@@ -194,7 +194,7 @@ async function renderTopBar() {
           return `<select class="nav-region-select" onclick="event.stopPropagation()" onchange="setHomeFilter('region', this.value)" title="切换查看分区">
             <option value=""${cur === '' ? ' selected' : ''}>全部区域</option>
             ${REGIONS.map(r => `<option value="${r.prefix}"${cur === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
-          </select>`;
+          </select><span class="nav-region nav-region-other" title="该账号不属于 4 个标准分区">其他</span>`;
         })();
     nav.innerHTML = `
       <span class="nav-right-group">
