@@ -870,9 +870,9 @@ async function renderForum(app) {
   const me = loggedIn ? api.getCurrentUser() : null;
   const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
 
+  // 顶部信息条：帖子计数留在左侧主区（发新帖按钮移到右侧搜索面板顶部，与 aside 同宽且一起 sticky 浮动）
   const topBanner = `<div class="toolbar">
          <span id="postCount">读取中...</span>
-         <button onclick="location.hash='post'">+ 发新帖</button>
        </div>`;
 
   // 分区 Tab（显示在搜索条顶部 / 左上）：按 CATEGORIES 顺序，meta 仅管理员会"看到它是管理员专属"的角标
@@ -909,6 +909,7 @@ async function renderForum(app) {
 
       <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里；不再显示用户匹配结果） -->
       <aside class="forum-aside card search-panel">
+        <button onclick="location.hash='post'" style="width:100%;padding:8px 12px;margin-bottom:12px;font-size:14px;font-weight:600;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer">+ 发新帖</button>
         <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
         <div class="search-row">
           <input id="sqInput" placeholder="关键字（同时搜帖子标题/正文 与 用户 UID/昵称）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()" onblur="window._sqBlurRestore(this)">
