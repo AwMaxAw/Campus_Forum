@@ -999,12 +999,12 @@ async function renderForum(app) {
       html += `<div id="pinnedSection" style="margin-bottom:12px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" onclick="window._togglePinned()">
           <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
-          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击折叠</span>
+          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
         </div>
-        <div id="pinnedExpanded">
+        <div id="pinnedExpanded" style="display:none">
           ${pinnedPosts.map(p => postCard(p, { allowClick: true })).join('')}
         </div>
-        <div id="pinnedCollapsed" style="display:none">
+        <div id="pinnedCollapsed">
           ${pinnedPosts.map(p => `
             <div class="card clickable" onclick="location.hash='#detail/${p.id}'" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px">
               <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
