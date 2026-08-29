@@ -1207,61 +1207,17 @@ function getForumViewMode() {
 function setForumView(mode) {
   if (mode !== 'cards' && mode !== 'list') return;
   if (typeof localStorage !== 'undefined') localStorage.setItem(VIEW_MODE_KEY, mode);
-  const old = document.getElementById('postList');
-  if (!old) { // 还没渲染列表（筛选后首屏），等 renderForum 自然渲染
+  // 重新渲染广场页面（复用缓存/重新请求，保证状态一致）
+  const app = document.getElementById('app');
+  if (app && location.hash.startsWith('#forum')) {
+    renderForum(app);
+  } else {
+    // 还没在广场页，先更新按钮样式，等 renderForum 自然渲染
     const cardsBtn = document.getElementById('viewModeCards');
     const listBtn = document.getElementById('viewModeList');
     if (cardsBtn) cardsBtn.classList.toggle('active', mode === 'cards');
     if (listBtn)  listBtn.classList.toggle('active', mode === 'list');
-    return;
   }
-  // 切换模式：遍历已有 data-forum-posts 重新渲染
-  const container = old.parentElement; // 原来的 .card 容器
-  if (!container) return;
-  const posts = (container.dataset.forumPosts ? JSON.parse(container.dataset.forumPosts) : null)
-             || _lastForumPostsCache || [];
-  const view = document.getElementById('postList');
-  if (posts.length === 0 || !view) return;
-
-  // 更新按钮激活态
-  const cardsBtn = document.getElementById('viewModeCards');
-  const listBtn = document.getElementById('viewModeList');
-  if (cardsBtn) cardsBtn.classList.toggle('active', mode === 'cards');
-  if (listBtn)  listBtn.classList.toggle('active', mode === 'list');
-
-  // 重新渲染
-  const pinnedPosts = posts.filter(p => p.isPinned);
-  const normalPosts = posts.filter(p => !p.isPinned);
-
-  let html = '';
-  if (mode === 'cards') {
-    // 九宫格卡片模式：置顶直接混排最前
-    view.className = 'cards-grid';
-    const all = [...pinnedPosts, ...normalPosts];
-    html = all.map(p => postCardCompact(p)).join('');
-  } else {
-    // 列表视图（外层已有 card 包裹，不要加 card class）
-    view.className = '';
-    if (pinnedPosts.length > 0) {
-      html += `<div id="pinnedSection" style="margin-bottom:12px">
-           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
-             <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
-             <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
-             <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
-           </div>
-           <div id="pinnedExpanded" style="display:none">
-             ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
-           </div>
-           <div id="pinnedCollapsed">
-             ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
-           </div>
-         </div>`;
-    }
-    html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
-    window._pinnedData = pinnedPosts.slice();
-    bindPinnedEvents();
-  }
-  view.innerHTML = html;
 }
 // 缓存最近一次帖子列表，供视图切换使用
 let _lastForumPostsCache = [];
