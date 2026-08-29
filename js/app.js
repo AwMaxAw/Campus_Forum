@@ -1040,16 +1040,19 @@ async function renderForum(app) {
         </div>
         <div id="pinnedCollapsed">
           ${pinnedPosts.map(p => `
-            <div class="card clickable" onclick="location.hash='#detail/${p.id}'" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+            <div class="card clickable" id="pinnedRow-${p.id}" onclick="window._expandPinned(${p.id})" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px" title="点击展开">
               <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
               ${categoryBadgeHtml(p.category)}
               <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
               <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(p.authorNickname || ('用户'+p.authorUid))}</span>
+              <span style="font-size:11px;color:#9ca3af;white-space:nowrap">▸ 点击展开</span>
             </div>
           `).join('')}
         </div>
       </div>`;
     }
+    // 供折叠行展开使用：把置顶帖完整数据存到全局
+    window._pinnedData = pinnedPosts.slice();
     html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
     listEl.outerHTML = html;
   } catch (e) {
@@ -1073,6 +1076,14 @@ window._togglePinned = function _togglePinned() {
     collapsed.style.display = '';
     if (hint) hint.textContent = '点击展开';
   }
+};
+// 折叠态单条置顶帖：第一次点击展开为完整卡片（postCard 已带 allowClick，再点一次即进详情页）
+window._expandPinned = function _expandPinned(id) {
+  const row = document.getElementById(`pinnedRow-${id}`);
+  const data = (window._pinnedData || []).find(p => p.id === id);
+  if (!row || !data) return;
+  // 用完整 postCard 替换折叠行；postCard 的 allowClick 已绑跳转详情，无需再处理
+  row.outerHTML = postCard(data, { allowClick: true });
 };
 window.homeRunSearch = function homeRunSearch() {
   const sq = document.getElementById('sqInput');
