@@ -2162,7 +2162,7 @@ function renderAdminPinList() {
         return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;background:#fffbeb">
           <span style="font-weight:700;color:#b45309;min-width:24px;text-align:center">${idx + 1}</span>
           ${categoryBadgeHtml(p.category)}
-          <a href="#post/${p.id}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
+          <a href="#detail/${p.id}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
           <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(author)}${p.createdAt ? ` · ${escapeHtml(formatTime(p.createdAt))}` : ''}</span>
           <button class="ghost" ${isFirst ? 'disabled' : ''} onclick="window._adminPinMove(${id},-1)" style="padding:2px 10px">↑</button>
           <button class="ghost" ${isLast ? 'disabled' : ''} onclick="window._adminPinMove(${id},1)" style="padding:2px 10px">↓</button>
