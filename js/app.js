@@ -184,18 +184,24 @@ async function renderTopBar() {
     const roleBadge = me.role === 'ops_admin'
       ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
       : '';
-    // 标准账号（2611/2612/2621/2622）锁定本分区，显示固定徽标；
-    // "其他"账号（管理员/非标准 UID）显示"其他"徽标，左侧附下拉框切换查看任意分区
+    // 顶栏分区控件统一用下拉框：
+    //   - 标准账号（2611/2612/2621/2622）：默认选中本分区并锁定，选择其他分区会提示无权限并恢复
+    //   - "其他"账号（管理员/非标准 UID）：可自由切换查看任意分区，并显示"其他"徽标
     const myPrefix = uidToRegionPrefix(me.uid);
-    const regionEl = myPrefix
-      ? `<span class="nav-region" title="所在区域（依据 UID 推断）">${escapeHtml(uidToRegion(me.uid))}</span>`
-      : (() => {
-          const cur = getHomeFilters().region;
-          return `<select class="nav-region-select" onclick="event.stopPropagation()" onchange="setHomeFilter('region', this.value)" title="切换查看分区">
-            <option value=""${cur === '' ? ' selected' : ''}>全部区域</option>
-            ${REGIONS.map(r => `<option value="${r.prefix}"${cur === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
-          </select><span class="nav-region nav-region-other" title="该账号不属于 4 个标准分区">其他</span>`;
-        })();
+    const cur = getHomeFilters().region;
+    // 标准账号：下拉框默认锁定在本分区；"其他"账号：默认用当前筛选值（可能为空=全部区域）
+    const lockedValue = myPrefix || '';
+    const selectedValue = myPrefix ? myPrefix : cur;
+    const onChangeAttr = myPrefix
+      ? `onchange="if(this.value !== '${lockedValue}'){alert('无权限选择：您只能查看所在分区的帖子。');this.value='${lockedValue}';}"`
+      : `onchange="setHomeFilter('region', this.value)"`;
+    const otherBadge = myPrefix
+      ? ''
+      : `<span class="nav-region nav-region-other" title="该账号不属于 4 个标准分区">其他</span>`;
+    const regionEl = `<select class="nav-region-select${myPrefix ? ' nav-region-locked' : ''}" onclick="event.stopPropagation()" ${onChangeAttr} title="${myPrefix ? '您所在分区，无权切换' : '切换查看分区'}">
+      ${myPrefix ? '' : `<option value=""${selectedValue === '' ? ' selected' : ''}>全部区域</option>`}
+      ${REGIONS.map(r => `<option value="${r.prefix}"${selectedValue === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
+    </select>${otherBadge}`;
     nav.innerHTML = `
       <span class="nav-right-group">
         <span class="nav-user" title="我的主页" onclick="location.hash='me'">
