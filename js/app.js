@@ -530,8 +530,9 @@ function renderUserSearchItem(u) {
   return `<div onclick="location.hash='#user/${escapeHtml(u.uid)}'" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:background 0.15s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
     <span class="avatar-sm" style="flex-shrink:0">${buildAvatarInner(u)}</span>
     <div style="flex:1;min-width:0">
-      <div style="display:flex;align-items:center;gap:4px">
+      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
         <span style="font-weight:500;color:#1f2937">${escapeHtml(u.nickname)}</span>
+        ${guildBadge(u)}
         ${matchBadge}
         ${roleBadgeInline(u.role)}
       </div>
@@ -945,6 +946,7 @@ function renderFeedbackItem(f) {
     <div style="flex:1;min-width:0">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;color:#374151">${escapeHtml(author.nickname || '匿名用户')}</span>
+        ${guildBadge(f.author || {})}
         ${author.role === 'ops_admin' ? `<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px">运维管理员</span>` : ''}
         <span style="font-size:11px;color:#9ca3af">${escapeHtml(formatTime(f.createdAt))}</span>
       </div>
@@ -3041,8 +3043,9 @@ async function renderAdmin(app) {
                 <a href="#detail/${p.id}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
                 ${p.imageCount > 1 ? `<span style="font-size:11px;color:#6b7280;background:#f3f4f6;padding:0 5px;border-radius:4px;flex-shrink:0">${p.imageCount}张</span>` : ''}
               </div>
-              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;overflow:hidden;flex-wrap:wrap">
                 <span style="flex-shrink:0">${escapeHtml(author)}</span>
+                ${guildBadge(p)}
                 <span style="flex-shrink:0">·</span>
                 <span style="flex-shrink:0">${escapeHtml(formatTime(p.createdAt))}</span>
                 <div style="display:flex;gap:3px;overflow:hidden">${tagHtml}</div>
@@ -3097,7 +3100,7 @@ async function renderAdmin(app) {
             ${categoryBadgeHtml(p.category)}
             <a href="#detail/${p.id}" style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
             ${tagHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;flex-basis:100%;margin-top:2px">${tagHtml}</div>` : ''}
-            <span style="white-space:nowrap;color:#6b7280;font-size:12px;margin-left:auto">${escapeHtml(author)} · ${escapeHtml(formatTime(p.createdAt))}</span>
+            <span style="white-space:nowrap;color:#6b7280;font-size:12px;margin-left:auto;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${escapeHtml(author)}${guildBadge(p)} · ${escapeHtml(formatTime(p.createdAt))}</span>
           </div>`;
         }).join('')}`;
     } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
@@ -3540,7 +3543,7 @@ function renderAdminPinList() {
           <span style="font-weight:700;color:#b45309;min-width:24px;text-align:center">${idx + 1}</span>
           ${categoryBadgeHtml(p.category)}
           <a href="#detail/${p.id}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
-          <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(author)}${p.createdAt ? ` · ${escapeHtml(formatTime(p.createdAt))}` : ''}</span>
+          <span style="white-space:nowrap;color:#6b7280;font-size:12px;display:flex;align-items:center;gap:4px">${escapeHtml(author)}${guildBadge(p)}${p.createdAt ? ` · ${escapeHtml(formatTime(p.createdAt))}` : ''}</span>
           <button class="ghost" ${isFirst ? 'disabled' : ''} onclick="window._adminPinMove(${id},-1)" style="padding:2px 10px">↑</button>
           <button class="ghost" ${isLast ? 'disabled' : ''} onclick="window._adminPinMove(${id},1)" style="padding:2px 10px">↓</button>
         </div>`;
@@ -4179,7 +4182,7 @@ async function renderUserProfile(app, uid) {
     <div class="profile-header" id="userProfileHeader">
       <div class="avatar-lg">${buildAvatarInner(profile)}</div>
       <div style="flex:1">
-        <div class="profile-name">${escapeHtml(profile.nickname)}${roleBadgeInline(profile.role)}${isMe ? ' <span style="color:#6b7280;font-size:12px;margin-left:6px">（这是你自己）</span>' : ''}</div>
+        <div class="profile-name">${escapeHtml(profile.nickname)}${guildBadge(profile)}${roleBadgeInline(profile.role)}${isMe ? ' <span style="color:#6b7280;font-size:12px;margin-left:6px">（这是你自己）</span>' : ''}</div>
         <div class="profile-uid">UID：${escapeHtml(profile.uid)}　帖子数：${profile.postCount || 0}　注册于 ${escapeHtml(formatTime(profile.createdAt))}</div>
         ${profile.bio ? `<div class="profile-bio">${escapeHtml(profile.bio)}</div>` : '<div class="profile-bio" style="opacity:0.6">这个人还没有写简介</div>'}
         <div style="display:flex;gap:8px;flex-wrap:wrap">${editBtn}${messageBtn}</div>

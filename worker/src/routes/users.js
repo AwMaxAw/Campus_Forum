@@ -36,8 +36,12 @@ users.get('/search', async (c) => {
       const row = await db
         .prepare(
           `SELECT u.uid, u.nickname, u.bio, u.avatar_url, u.role, u.created_at,
-                  (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count
-           FROM users u WHERE u.uid = ?`
+                  (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count,
+                  gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
+           FROM users u
+           LEFT JOIN guild_members gm ON gm.uid = u.uid
+           LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
+           WHERE u.uid = ?`
         )
         .bind(q)
         .first();
@@ -51,6 +55,9 @@ users.get('/search', async (c) => {
           createdAt: row.created_at,
           postCount: row.post_count || 0,
           matchType: 'uid',
+          guildId: row.guild_id || null,
+          guildName: row.guild_name || null,
+          guildIcon: row.guild_icon || null,
         });
       }
     }
@@ -60,8 +67,11 @@ users.get('/search', async (c) => {
     const rows = await db
       .prepare(
         `SELECT u.uid, u.nickname, u.bio, u.avatar_url, u.role, u.created_at,
-                (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count
+                (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count,
+                gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
          FROM users u
+         LEFT JOIN guild_members gm ON gm.uid = u.uid
+         LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
          WHERE LOWER(u.nickname) LIKE LOWER(?)
          ORDER BY
            CASE WHEN u.nickname = ? THEN 0 ELSE 1 END,
@@ -85,6 +95,9 @@ users.get('/search', async (c) => {
         createdAt: r.created_at,
         postCount: r.post_count || 0,
         matchType: 'nickname',
+        guildId: r.guild_id || null,
+        guildName: r.guild_name || null,
+        guildIcon: r.guild_icon || null,
       });
     }
 
@@ -102,8 +115,11 @@ users.get('/:uid', async (c) => {
     const row = await db
       .prepare(
         `SELECT u.uid, u.nickname, u.bio, u.avatar_url, u.role, u.created_at, u.updated_at,
-                (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count
+                (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count,
+                gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
          FROM users u
+         LEFT JOIN guild_members gm ON gm.uid = u.uid
+         LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
          WHERE u.uid = ?`
       )
       .bind(uid)
@@ -118,6 +134,9 @@ users.get('/:uid', async (c) => {
       createdAt: row.created_at,
       updatedAt: row.updated_at || null,
       postCount: row.post_count || 0,
+      guildId: row.guild_id || null,
+      guildName: row.guild_name || null,
+      guildIcon: row.guild_icon || null,
     }));
   } catch (e) {
     return fail(`[user profile] ${e.name}: ${e.message}`, 500);

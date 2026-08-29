@@ -61,6 +61,9 @@ function mapPostRow(row) {
     isPinned: !!row.is_pinned,
     pinOrder: row.pin_order != null ? row.pin_order : 0,
     createdAt: row.created_at,
+    authorGuildId: row.author_guild_id || null,
+    authorGuildName: row.author_guild_name || null,
+    authorGuildIcon: row.author_guild_icon || null,
   };
 }
 
@@ -179,9 +182,12 @@ admin.get('/pinned-posts', requireAdmin(), async (c) => {
     const rows = await db
       .prepare(
         `SELECT p.id, p.title, p.author_uid, p.category, p.tags, p.is_pinned, p.pin_order, p.created_at,
-                u.nickname AS author_nickname
+                u.nickname AS author_nickname,
+                gm.guild_id AS author_guild_id, g.name AS author_guild_name, g.icon AS author_guild_icon
          FROM posts p
          LEFT JOIN users u ON u.uid = p.author_uid
+         LEFT JOIN guild_members gm ON gm.uid = p.author_uid
+         LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
          WHERE p.is_pinned = 1 AND p.is_hidden = 0
          ORDER BY p.pin_order ASC, p.created_at ASC`
       )
@@ -258,9 +264,12 @@ admin.get('/posts', requireAdmin(), async (c) => {
       .prepare(
         `SELECT p.id, p.title, p.author_uid, p.category, p.tags, p.is_pinned, p.pin_order, p.created_at,
                 u.nickname AS author_nickname, u.role AS author_role,
-                p.view_count, p.like_count, p.comment_count
+                p.view_count, p.like_count, p.comment_count,
+                gm.guild_id AS author_guild_id, g.name AS author_guild_name, g.icon AS author_guild_icon
          FROM posts p
          LEFT JOIN users u ON u.uid = p.author_uid
+         LEFT JOIN guild_members gm ON gm.uid = p.author_uid
+         LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
          WHERE p.is_pinned = 0 AND p.is_hidden = 0
          ORDER BY p.created_at DESC
          LIMIT 500`
@@ -282,9 +291,12 @@ admin.get('/posts-with-images', requireAdmin(), async (c) => {
     const rows = await db
       .prepare(
         `SELECT p.id, p.title, p.author_uid, p.category, p.tags, p.image_ids, p.created_at,
-                u.nickname AS author_nickname
+                u.nickname AS author_nickname,
+                gm.guild_id AS author_guild_id, g.name AS author_guild_name, g.icon AS author_guild_icon
          FROM posts p
          LEFT JOIN users u ON u.uid = p.author_uid
+         LEFT JOIN guild_members gm ON gm.uid = p.author_uid
+         LEFT JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
          WHERE p.is_hidden = 0 AND p.image_ids IS NOT NULL AND p.image_ids <> '' AND p.image_ids <> '[]'
          ORDER BY p.created_at DESC
          LIMIT 500`
@@ -321,6 +333,9 @@ admin.get('/posts-with-images', requireAdmin(), async (c) => {
         imageCount: imageIds.length,
         firstImage,
         createdAt: r.created_at,
+        authorGuildId: r.author_guild_id || null,
+        authorGuildName: r.author_guild_name || null,
+        authorGuildIcon: r.author_guild_icon || null,
       });
     }
 
