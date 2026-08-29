@@ -2054,6 +2054,14 @@ async function renderExp(app) {
   };
   const calCellsHtml = buildCalCells(calData.year, calData.month, calData.checkedDates);
 
+  // 今日运势（优先从 calData 取，没有则从 checkin 返回值）
+  const fortuneHtml = calData.fortune
+    ? `<div class="checkin-fortune" id="checkinFortune" style="color:${calData.fortuneColor || '#2563eb'}">
+         <span class="checkin-fortune-emoji">${calData.fortuneEmoji || '🎭'}</span>
+         <span class="checkin-fortune-text">今日运势：<b>${calData.fortune}</b></span>
+       </div>`
+    : '';
+
   app.innerHTML = `
     <!-- 签到板块（独立卡片）-->
     <div class="card checkin-card">
@@ -2064,6 +2072,7 @@ async function renderExp(app) {
         </div>
         <div class="checkin-btn">${checkinBtnHtml}</div>
       </div>
+      ${fortuneHtml}
     </div>
 
     <!-- 签到日历（独立卡片，缩小版导航栏日历风格）-->
@@ -2155,10 +2164,32 @@ window.doCheckinAction = async function () {
   }
   const d = r.data;
   const bonusText = d.isBonusDay ? `（🎁 连续 ${d.streak} 天额外奖励 +${api.EXP.CHECKIN_STREAK_BONUS}）` : '';
-  const fortuneLine = d.fortune ? `\n\n${d.fortuneEmoji || '🎭'} 今日运势：${d.fortune}${d.streak >= 3 ? '\n' + '★'.repeat(Math.min(5, Math.ceil((d.streak % 7) + 1) * 5 / 7)) : ''}` : '';
-  alert(`✅ 签到成功！获得 ${d.gained} 积分${bonusText}，连续签到 ${d.streak} 天。${fortuneLine}`);
+  alert(`✅ 签到成功！获得 ${d.gained} 积分${bonusText}，连续签到 ${d.streak} 天。`);
   refreshNotificationBadge();
-  location.hash = 'exp'; // 重新渲染积分页刷新日历+积分
+
+  // DOM 局部更新：按钮 → 已签到；运势 → 显示；连续天数刷新
+  btn.disabled = true; btn.textContent = '✅ 今日已签到';
+  // 更新连续天数
+  const streakEl = document.querySelector('.checkin-streak b');
+  if (streakEl) streakEl.textContent = d.streak;
+  // 更新/插入运势
+  const fortuneEl = document.getElementById('checkinFortune');
+  const fortuneHtml = `<div class="checkin-fortune" id="checkinFortune" style="color:${d.fortuneColor || '#2563eb'}">
+    <span class="checkin-fortune-emoji">${d.fortuneEmoji || '🎭'}</span>
+    <span class="checkin-fortune-text">今日运势：<b>${d.fortune}</b></span>
+  </div>`;
+  if (fortuneEl) {
+    fortuneEl.outerHTML = fortuneHtml;
+  } else {
+    const card = document.querySelector('.checkin-card');
+    if (card) {
+      const top = card.querySelector('.checkin-top');
+      if (top) top.insertAdjacentHTML('afterend', fortuneHtml);
+      else card.insertAdjacentHTML('beforeend', fortuneHtml);
+    }
+  }
+  // 刷新日历网格（因为今天格子应该变成 checked）
+  await renderCheckinCalendarOnly(_checkinYear || new Date().getUTCFullYear(), _checkinMonth || new Date().getUTCMonth() + 1);
 };
 
 window.shiftCheckinMonth = async function (delta) {

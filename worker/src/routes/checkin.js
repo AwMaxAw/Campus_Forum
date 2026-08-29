@@ -139,17 +139,23 @@ checkin.get('/calendar', requireAuth(), async (c) => {
     .prepare('SELECT check_date, exp_delta FROM check_ins WHERE uid = ? AND check_date >= ? AND check_date < ? ORDER BY check_date ASC')
     .bind(uid, start, end).all();
 
-  // 查连续天数 + 是否今日已签
+  // 查连续天数 + 是否今日已签 + 今日运势
   const u = await db.prepare('SELECT checkin_streak FROM users WHERE uid = ?').bind(uid).first();
   const todayChecked = await db
     .prepare('SELECT 1 FROM check_ins WHERE uid = ? AND check_date = ?')
     .bind(uid, utcToday()).first();
+
+  const fortune = pickFortune(uid, utcToday());
+  const fs = FORTUNE_STYLE[fortune];
 
   return c.json(ok({
     year, month,
     checkedDates: rows.results.map(r => ({ date: r.check_date, expDelta: r.exp_delta })),
     streak: u ? (u.checkin_streak || 0) : 0,
     todayChecked: !!todayChecked,
+    fortune,
+    fortuneEmoji: fs.emoji,
+    fortuneColor: fs.color,
   }));
 });
 

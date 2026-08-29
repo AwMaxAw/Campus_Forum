@@ -622,6 +622,15 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 }
 .checkin-btn button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(234,88,12,0.4); }
 .checkin-btn button:disabled { background: #d4d4d8; box-shadow: none; }
+.checkin-fortune {
+  margin-top: 14px; padding: 10px 14px;
+  background: #fff; border-radius: 10px;
+  border: 1px dashed #fed7aa;
+  display: flex; align-items: center; gap: 10px;
+}
+.checkin-fortune-emoji { font-size: 26px; line-height: 1; }
+.checkin-fortune-text { font-size: 14px; }
+.checkin-fortune-text b { font-size: 16px; margin-left: 2px; }
 
 /* ==================== 签到日历（独立卡片）==================== */
 .ckin-cal-card { background: #fff; }
