@@ -75,7 +75,7 @@ admin.get('/users', requireAdmin(), async (c) => {
     // 左连 posts 统计每用户的帖子数（不含软删）+ 返回 last_login_at / is_banned
     const rows = await db
       .prepare(
-        `SELECT u.uid, u.nickname, u.role, u.bio, u.avatar_url, u.created_at,
+        `SELECT u.uid, u.nickname, u.role, u.bio, u.avatar_url, u.created_at, u.updated_at,
                 u.is_banned, u.last_login_at, u.exp_points,
                 (SELECT COUNT(*) FROM posts p WHERE p.author_uid = u.uid AND p.is_hidden = 0) AS post_count,
                 gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
@@ -92,6 +92,7 @@ admin.get('/users', requireAdmin(), async (c) => {
       bio: r.bio || '',
       avatarUrl: r.avatar_url || '',
       createdAt: r.created_at,
+      updatedAt: r.updated_at || null,
       isBanned: !!r.is_banned,
       lastLoginAt: r.last_login_at || null,
       postCount: r.post_count || 0,

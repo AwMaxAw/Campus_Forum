@@ -3837,7 +3837,7 @@ async function renderAdminUsers(host) {
           <div style="overflow-x:auto">
             <table class="admin-table">
               <thead><tr>
-                <th>UID</th><th>昵称</th><th>公会</th><th>角色</th><th>等级</th><th>积分</th><th>帖子数</th>
+                <th>头像</th><th>UID</th><th>昵称</th><th>公会</th><th>角色</th><th>等级</th><th>积分</th><th>帖子数</th>
                 <th>注册时间</th><th>最后登录</th><th>状态</th><th>操作</th>
               </tr></thead>
               <tbody>
@@ -3954,7 +3954,16 @@ function buildUserRow(u, myUid, myRole) {
     ? `${guildBadge(u)}`
     : `<span class="hint" style="margin:0">没有</span>`;
 
+  // 头像（优先真实图，否则首字母占位）
+  const avatarUrl = api.getAvatarUrl(u);
+  const initial = ((u.nickname || u.uid) || '?').slice(0, 1).toUpperCase();
+  const avatarCell = `<a href="#user/${escapeHtml(u.uid)}" style="text-decoration:none"><div class="avatar avatar-small" title="${escapeHtml(u.nickname || u.uid)}">
+    <span class="avatar-initials">${escapeHtml(initial)}</span>
+    ${avatarUrl ? `<img class="avatar-img" src="${escapeHtml(avatarUrl)}" alt="头像" onerror="this.style.display='none'">` : ''}
+  </div></a>`;
+
   return `<tr>
+    <td style="width:44px;text-align:center">${avatarCell}</td>
     <td><a href="#user/${escapeHtml(u.uid)}" style="color:#2563eb;text-decoration:none">${escapeHtml(u.uid)}</a></td>
     <td><a href="#user/${escapeHtml(u.uid)}" style="color:inherit;text-decoration:none">${escapeHtml(u.nickname)}</a>${selfTag}</td>
     <td>${guildCell}</td>
