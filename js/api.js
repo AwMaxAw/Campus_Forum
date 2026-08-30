@@ -196,6 +196,19 @@ async function request(path, { method = 'GET', body, needsAuth = true, raw = fal
       if (!isAuthEndpoint) {
         console.warn(`[auth] ⚠️ 请求 ${method} ${path} 返回 401，已自动清除登录态。响应：`, text.slice(0, 300));
         clearAuth();
+        // 触发 UI 同步：清 localStorage 后让顶栏 + 路由统一重绘，并跳到登录页
+        try {
+          setTimeout(() => {
+            if (typeof window.renderTopBar === 'function') window.renderTopBar();
+            if (typeof window.route === 'function') {
+              if (location.hash !== '#login') location.hash = 'login';
+              window.route();
+            } else if (location.hash !== '#login') {
+              location.hash = 'login';
+              location.reload();
+            }
+          }, 0);
+        } catch {}
       }
     }
     return data;

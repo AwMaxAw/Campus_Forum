@@ -12,6 +12,9 @@
  *   - secret 通过 Workers Secrets（wrangler secret put JWT_SECRET）注入。
  */
 
+import { jwt } from 'hono/jwt';
+import { createMiddleware } from 'hono/factory';
+
 const PBKDF2_ALGO = 'PBKDF2';
 const HMAC_ALGO = 'SHA-256';
 const ITERATIONS = 100000;
@@ -115,27 +118,47 @@ export function isSubAdmin(role) { return role === 'admin'; }
 export function isAnyAdmin(role) { return role === 'ops_admin' || role === 'admin'; }
 
 // requireAnyAdmin: ops_admin 或 admin 都放行（用于「协助管理员」面板通用入口）
+// 注意：此中间件会先跑 JWT 验证，所以调用方无需再 requireAuth。
 export function requireAnyAdmin() {
-  return async (c, next) => {
-    const payload = c.get('jwtPayload');
+  return createMiddleware(async (c, next) => {
+    // 若上游已经做过 JWT（c.get('jwtPayload') 已有），跳过避免重复验证
+    let payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) {
+      try {
+        const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+        await mw(c, () => Promise.resolve());
+      } catch (e) {
+        return c.json({ success: false, message: '需要登录' }, 401);
+      }
+      payload = c.get('jwtPayload');
+    }
     if (!payload || !payload.sub) return c.json({ success: false, message: '需要登录' }, 401);
     const user = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
     if (!user) return c.json({ success: false, message: '用户不存在' }, 404);
     if (!isAnyAdmin(user.role)) return c.json({ success: false, message: '无权限：需要管理员或运维管理员' }, 403);
     return next();
-  };
+  });
 }
 
 // requireOpsAdmin: 只允许 ops_admin（用于真正执行删除/封禁/审批动作的接口）
 export function requireOpsAdmin() {
-  return async (c, next) => {
-    const payload = c.get('jwtPayload');
+  return createMiddleware(async (c, next) => {
+    let payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) {
+      try {
+        const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+        await mw(c, () => Promise.resolve());
+      } catch (e) {
+        return c.json({ success: false, message: '需要登录' }, 401);
+      }
+      payload = c.get('jwtPayload');
+    }
     if (!payload || !payload.sub) return c.json({ success: false, message: '需要登录' }, 401);
     const user = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
     if (!user) return c.json({ success: false, message: '用户不存在' }, 404);
     if (!isOpsAdmin(user.role)) return c.json({ success: false, message: '无权限：仅运维管理员可操作' }, 403);
     return next();
-  };
+  });
 }
 
 // 当前登录者 role 快速读取（路由里直接复用减少重复 SQL）

@@ -261,6 +261,7 @@ async function renderTopBar() {
   }
   renderDrawer(loggedIn, me, unreadMsg, unreadNotif);
 }
+window.renderTopBar = renderTopBar;
 
 // ==================== 左侧抽屉 ====================
 function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
@@ -4866,6 +4867,7 @@ function route() {
   else if (path === 'forum') renderForum(app);
   else renderCover(app);
 }
+window.route = route;
 
 window.addEventListener('hashchange', () => { route(); refreshDrawerActive(); });
 window.addEventListener('load', async () => {
