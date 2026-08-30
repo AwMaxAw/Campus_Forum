@@ -599,6 +599,18 @@ export const admin = {
     if (!id) return { success: false, message: '缺少帖子 id' };
     return request(`/api/admin/posts/${id}`, { method: 'DELETE' });
   },
+  /** 仅删除帖子的图片（保留帖子本身），自动在正文末尾追加删除说明
+   * reason：管理员填写的删除理由，必填不限字数
+   */
+  async stripPostImages(id, reason) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少帖子 id' };
+    if (!reason || !String(reason).trim()) return { success: false, message: '请填写删除理由' };
+    return request(`/api/admin/posts/${id}/strip-images`, {
+      method: 'POST',
+      body: { reason: String(reason).trim() },
+    });
+  },
   /** 封禁账号（危险操作，前端需二次确认） */
   async banUser(uid) {
     if (!tokenCache) return { success: false, message: '请先登录' };

@@ -3176,18 +3176,23 @@ async function renderAdmin(app) {
                 <div style="display:flex;gap:3px;overflow:hidden">${tagHtml}</div>
               </div>
             </div>
-            <button data-del-post="${p.id}" style="flex-shrink:0;padding:4px 10px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:12px;cursor:pointer" title="删除此帖（连带图片）">🗑 删除</button>
+            <button data-del-post="${p.id}" style="flex-shrink:0;padding:4px 10px;border:1px solid #fed7aa;background:#fff7ed;color:#c2410c;border-radius:6px;font-size:12px;cursor:pointer" title="仅删除图片（保留帖子正文，并追加删除说明）">🖼 删除图片</button>
           </div>`;
         }).join('')}`;
-      // 绑定删除按钮
+      // 绑定删除图片按钮
       host.querySelectorAll('[data-del-post]').forEach(btn => {
         btn.addEventListener('click', async () => {
           const postId = parseInt(btn.getAttribute('data-del-post'), 10);
-          if (!confirm(`确定删除帖子 #${postId}？\n将连带删除该帖的全部图片、评论、点赞等数据，不可恢复！`)) return;
-          btn.disabled = true; btn.textContent = '删除中...';
+          // 输入理由
+          const reason = prompt(`请填写删除帖子 #${postId} 图片的理由：`, '');
+          if (reason === null) return;
+          if (!String(reason).trim()) { alert('请填写理由'); return; }
+          if (!confirm(`确定删除帖子 #${postId} 的全部图片？\n\n将从 images 表移除图片，并在原帖末尾追加删除说明；帖子正文、评论等数据保留。`)) return;
+          btn.disabled = true; btn.textContent = '处理中...';
           try {
-            const res = await api.admin.deletePost(postId);
+            const res = await api.admin.stripPostImages(postId, reason);
             if (res.success) {
+              // 该帖图片已全部删除，从列表中移除该行
               btn.closest('[data-del-post]')?.parentElement?.remove();
               // 刷新计数
               const remaining = host.querySelectorAll('[data-del-post]').length;
@@ -3196,11 +3201,11 @@ async function renderAdmin(app) {
               if (remaining === 0) host.innerHTML = `<span class="hint">暂无带图片的帖子</span>`;
             } else {
               alert('删除失败：' + (res.message || '未知错误'));
-              btn.disabled = false; btn.textContent = '🗑 删除';
+              btn.disabled = false; btn.textContent = '🖼 删除图片';
             }
           } catch (e) {
             alert('删除出错：' + e.message);
-            btn.disabled = false; btn.textContent = '🗑 删除';
+            btn.disabled = false; btn.textContent = '🖼 删除图片';
           }
         });
       });

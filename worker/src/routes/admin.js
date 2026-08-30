@@ -426,6 +426,58 @@ admin.delete('/posts/:id', requireAdmin(), async (c) => {
   }
 });
 
+// ==================== 仅删除帖子的图片（保留帖子本身）+ 在正文末尾追加删除说明 ====================
+// body: { reason: string }  —— 删除理由（必填，任意长度）
+admin.post('/posts/:id/strip-images', requireAdmin(), async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'), 10);
+    if (!Number.isFinite(id) || id <= 0) return fail('帖子 ID 无效');
+
+    const db = c.env.DB;
+    const post = await db.prepare('SELECT id, content, image_ids FROM posts WHERE id = ?').bind(id).first();
+    if (!post) return fail('帖子不存在', 404);
+
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+    const reason = ((body && body.reason) || '').toString().trim();
+    if (!reason) return fail('请填写删除理由');
+
+    // 解析 image_ids 得到图片数量和ID列表
+    let imageIds = [];
+    try {
+      if (post.image_ids) {
+        const parsed = JSON.parse(post.image_ids);
+        if (Array.isArray(parsed)) imageIds = parsed.map(Number).filter(n => Number.isFinite(n) && n > 0);
+      }
+    } catch {}
+
+    const count = imageIds.length;
+
+    // 删图片记录
+    if (count > 0) {
+      const stmts = imageIds.map(imgId =>
+        db.prepare('DELETE FROM images WHERE id = ?').bind(imgId)
+      );
+      await db.batch(stmts);
+    }
+
+    // 正文末尾追加一行说明
+    const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const note = `\n\n---\n*【管理员操作】${nowStr}｜原帖包含 ${count} 张图片，因「${reason}」已全部移除*`;
+    const newContent = (post.content || '') + note;
+
+    // 清空 image_ids 字段 + 追加说明
+    await db
+      .prepare("UPDATE posts SET image_ids = NULL, content = ?, updated_at = datetime('now') WHERE id = ?")
+      .bind(newContent, id)
+      .run();
+
+    return c.json(ok({ id, removedCount: count }));
+  } catch (e) {
+    return fail(`[admin strip-images] ${e.name}: ${e.message}`, 500);
+  }
+});
+
 // ==================== 调整用户积分（运维管理员专属）====================
 // body: { expPoints: number }
 admin.patch('/users/:uid/exp', requireAdmin(), async (c) => {
