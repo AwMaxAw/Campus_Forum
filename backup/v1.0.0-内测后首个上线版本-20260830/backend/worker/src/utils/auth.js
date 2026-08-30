@@ -1,0 +1,212 @@
+/**
+ * 认证工具（零第三方依赖，只用 Web Crypto API）
+ *
+ * 密码哈希：PBKDF2-HMAC-SHA-256
+ *   - 16 字节随机 salt
+ *   - 100,000 次迭代（OWASP 2023 推荐下限）
+ *   - 存储格式：`pbkdf2_sha256$100000$<salt_hex>$<hash_hex>`
+ *     每段 $ 分隔，将来换算法只加新前缀，老密码可平滑迁移。
+ *
+ * Token：HMAC-SHA-256 JWT（Hono 内置）
+ *   - payload: { sub: uid, role, iat, exp }
+ *   - secret 通过 Workers Secrets（wrangler secret put JWT_SECRET）注入。
+ */
+
+import { jwt } from 'hono/jwt';
+import { createMiddleware } from 'hono/factory';
+
+const PBKDF2_ALGO = 'PBKDF2';
+const HMAC_ALGO = 'SHA-256';
+const ITERATIONS = 100000;
+const KEY_LEN_BITS = 256;
+const SALT_BYTES = 16;
+
+const ENCODER = new TextEncoder();
+const DECODER = new TextDecoder();
+
+function bufToHex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBuf(hex) {
+  if (hex.length % 2 !== 0) throw new Error('hex 长度不对');
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes.buffer;
+}
+
+// ==================== 密码哈希 ====================
+
+export async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    ENCODER.encode(password),
+    { name: PBKDF2_ALGO },
+    false,
+    ['deriveBits']
+  );
+  const derived = await crypto.subtle.deriveBits(
+    {
+      name: PBKDF2_ALGO,
+      salt,
+      iterations: ITERATIONS,
+      hash: HMAC_ALGO,
+    },
+    baseKey,
+    KEY_LEN_BITS
+  );
+  return `pbkdf2_sha256$${ITERATIONS}$${bufToHex(salt.buffer)}$${bufToHex(derived)}`;
+}
+
+export async function verifyPassword(password, storedHash) {
+  if (!storedHash || typeof storedHash !== 'string') return false;
+  const parts = storedHash.split('$');
+  // 只支持我们自己生成的 pbkdf2_sha256 格式
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2_sha256') return false;
+
+  const iterations = parseInt(parts[1], 10);
+  const saltHex = parts[2];
+  const hashHex = parts[3];
+  if (!iterations || !saltHex || !hashHex) return false;
+
+  try {
+    const salt = hexToBuf(saltHex);
+    const expected = hexToBuf(hashHex);
+    const baseKey = await crypto.subtle.importKey(
+      'raw',
+      ENCODER.encode(password),
+      { name: PBKDF2_ALGO },
+      false,
+      ['deriveBits']
+    );
+    const derived = await crypto.subtle.deriveBits(
+      {
+        name: PBKDF2_ALGO,
+        salt: new Uint8Array(salt),
+        iterations,
+        hash: HMAC_ALGO,
+      },
+      baseKey,
+      expected.byteLength * 8
+    );
+    // 恒时比较（避免时序攻击）
+    const a = new Uint8Array(derived);
+    const b = new Uint8Array(expected);
+    if (a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+    return diff === 0;
+  } catch {
+    return false;
+  }
+}
+
+// ==================== UID 校验 ====================
+export function isUidValid(uid) {
+  // 新格式：YY(2) + Campus(1) + SchoolLevel(1) + Class(2) + StudentNo(2) = 8 位
+  // YY: 26, Campus: 1=广五本部 2=金碧校区, SchoolLevel: 1=初中 2=高中
+  // 运维管理员：00000001（8 位全 0 前缀，特判）
+  return typeof uid === 'string' && (/^26[12][12]\d{4}$/.test(uid) || /^0{7}1$/.test(uid));
+}
+
+// ==================== 角色判定 helper（ops_admin = 最高级运维管理员；admin = 协助管理员） ====================
+export function isOpsAdmin(role) { return role === 'ops_admin'; }
+export function isSubAdmin(role) { return role === 'admin'; }
+export function isAnyAdmin(role) { return role === 'ops_admin' || role === 'admin'; }
+
+// requireAnyAdmin: ops_admin 或 admin 都放行（用于「协助管理员」面板通用入口）
+// 注意：此中间件会先跑 JWT 验证，所以调用方无需再 requireAuth。
+export function requireAnyAdmin() {
+  return createMiddleware(async (c, next) => {
+    // 若上游已经做过 JWT（c.get('jwtPayload') 已有），跳过避免重复验证
+    let payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) {
+      try {
+        const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+        await mw(c, () => Promise.resolve());
+      } catch (e) {
+        return c.json({ success: false, message: '需要登录' }, 401);
+      }
+      payload = c.get('jwtPayload');
+    }
+    if (!payload || !payload.sub) return c.json({ success: false, message: '需要登录' }, 401);
+    const user = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
+    if (!user) return c.json({ success: false, message: '用户不存在' }, 404);
+    if (!isAnyAdmin(user.role)) return c.json({ success: false, message: '无权限：需要管理员或运维管理员' }, 403);
+    return next();
+  });
+}
+
+// requireOpsAdmin: 只允许 ops_admin（用于真正执行删除/封禁/审批动作的接口）
+export function requireOpsAdmin() {
+  return createMiddleware(async (c, next) => {
+    let payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) {
+      try {
+        const mw = jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+        await mw(c, () => Promise.resolve());
+      } catch (e) {
+        return c.json({ success: false, message: '需要登录' }, 401);
+      }
+      payload = c.get('jwtPayload');
+    }
+    if (!payload || !payload.sub) return c.json({ success: false, message: '需要登录' }, 401);
+    const user = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
+    if (!user) return c.json({ success: false, message: '用户不存在' }, 404);
+    if (!isOpsAdmin(user.role)) return c.json({ success: false, message: '无权限：仅运维管理员可操作' }, 403);
+    return next();
+  });
+}
+
+// 当前登录者 role 快速读取（路由里直接复用减少重复 SQL）
+export async function getCurrentRole(c) {
+  const payload = c.get('jwtPayload');
+  if (!payload || !payload.sub) return null;
+  const u = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
+  return u ? u.role : null;
+}
+
+// ==================== 用户序列化（返回给前端的用户对象） ====================
+// 若传入 db 会额外关联查当前公会信息（nav 登录/注册/快速登录/更新资料 全部路径自动生效）
+export async function serializeUser(row, db) {
+  if (!row) return null;
+  const base = {
+    uid: row.uid,
+    nickname: row.nickname,
+    role: row.role,
+    avatarUrl: row.avatar_url || null,
+    bio: row.bio || null,
+    expPoints: typeof row.exp_points === 'number' ? row.exp_points : Number(row.exp_points || 0),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || null,
+    guildId: null,
+    guildName: null,
+    guildIcon: null,
+  };
+  if (db && row.uid) {
+    try {
+      const g = await db
+        .prepare(
+          `SELECT gm.guild_id AS guild_id, g.name AS guild_name, g.icon AS guild_icon
+           FROM guild_members gm
+           JOIN guilds g ON g.id = gm.guild_id AND g.status = 'active'
+           WHERE gm.uid = ? LIMIT 1`
+        )
+        .bind(row.uid)
+        .first();
+      if (g) {
+        base.guildId = g.guild_id || null;
+        base.guildName = g.guild_name || null;
+        base.guildIcon = g.guild_icon || null;
+      }
+    } catch {}
+  }
+  return base;
+}
+
+// ==================== JWT 辅助：手动 + Hono sign 都行 ====================
+// 这里导出常量，具体签/验在路由层用 hono/jwt
+export const JWT_TTL_SEC = 7 * 24 * 60 * 60; // 7 天

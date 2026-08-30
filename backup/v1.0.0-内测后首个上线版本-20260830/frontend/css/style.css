@@ -1,0 +1,987 @@
+/* ============================================================
+   广五校园论坛 - 样式（阶段 4：详情页/楼中楼/私信/公告/个人中心）
+   ============================================================ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  min-height: 100vh;
+  line-height: 1.55;
+}
+a { color: #0071e3; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* --------------------- 顶栏 --------------------- */
+.topbar {
+  background: #fff;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e5e5e7;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.menu-toggle {
+  background: none; border: none; cursor: pointer;
+  font-size: 22px; padding: 4px 8px; line-height: 1;
+  color: #1d1d1f; border-radius: 6px;
+}
+.menu-toggle:hover { background: #f3f4f6; }
+.topbar h1 { font-size: 18px; margin-left: 4px; }
+.topbar h1 a { color: inherit; }
+.topbar h1 a:hover { text-decoration: none; }
+.topbar-nav {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  flex: 1; min-width: 0;
+}
+.nav-right-group {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: auto;
+}
+.user-nickname { margin: 0 8px; font-weight: 500; }
+.unread-badge {
+  background: #ff3b30; color: #fff; border-radius: 10px;
+  font-size: 11px; padding: 0 5px; margin-left: 2px;
+  min-width: 16px; display: inline-block; text-align: center; line-height: 16px;
+}
+
+/* --------------------- 左侧抽屉 --------------------- */
+.drawer-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 200;
+}
+.drawer-overlay.open { opacity: 1; pointer-events: auto; }
+.side-drawer {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 260px; max-width: 80vw;
+  background: #fff;
+  box-shadow: 2px 0 12px rgba(0,0,0,0.12);
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  z-index: 201;
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.side-drawer.open { transform: translateX(0); }
+.drawer-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid #e5e5e7;
+}
+.drawer-title { font-size: 16px; font-weight: 600; color: #1d1d1f; }
+.drawer-close {
+    background: none; border: none; cursor: pointer;
+    font-size: 18px; color: #6e6e73; padding: 4px 8px; border-radius: 6px;
+}
+.drawer-close:hover { background: #f3f4f6; }
+.drawer-nav { padding: 8px 0; display: flex; flex-direction: column; }
+.drawer-nav a, .drawer-nav button.drawer-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 18px;
+  color: #1d1d1f; text-decoration: none;
+  font-size: 15px; cursor: pointer;
+  background: none; border: none; width: 100%; text-align: left;
+  transition: background 0.15s;
+}
+.drawer-nav a:hover, .drawer-nav button.drawer-item:hover { background: #f3f4f6; text-decoration: none; }
+.drawer-nav a.active { background: #e8f0fe; color: #0071e3; font-weight: 500; }
+.drawer-nav .drawer-divider {
+  height: 1px; background: #e5e5e7; margin: 8px 12px;
+}
+.drawer-nav .drawer-section-label {
+  padding: 8px 18px 4px;
+  font-size: 12px; color: #86868b; font-weight: 500;
+}
+@media (max-width: 600px) {
+  .topbar-nav { display: none; }  /* 小屏只露汉堡+标题+右组 */
+}
+
+/* --------------------- 容器 --------------------- */
+#app {
+  max-width: 1000px;
+  margin: 20px auto;
+  padding: 0 16px;
+}
+
+/* --------------------- 卡片 --------------------- */
+.card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e5e7;
+  transition: box-shadow .15s;
+}
+.card.clickable { cursor: pointer; }
+.card.clickable:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.05); border-color: #d2d2d7; }
+.card h3 { margin-bottom: 8px; font-size: 17px; }
+.meta { color: #6e6e73; font-size: 12px; margin-bottom: 8px; }
+
+input, textarea, button, select {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #d2d2d7;
+  outline: none;
+  background: #fff;
+}
+input:focus, textarea:focus, select:focus { border-color: #0071e3; }
+input { display: block; margin-bottom: 8px; width: 100%; }
+textarea { display: block; margin-bottom: 8px; width: 100%; min-height: 80px; resize: vertical; }
+button {
+  background: #0071e3;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  margin-right: 6px;
+  transition: background .15s, opacity .15s;
+}
+button:hover:not(:disabled) { background: #0077ed; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary {
+  background: #e5e5e7;
+  color: #1d1d1f;
+}
+button.secondary:hover:not(:disabled) { background: #dcdce0; }
+button.danger { background: #ff3b30; }
+button.danger:hover:not(:disabled) { background: #d70015; }
+button.ghost { background: transparent; color: #0071e3; padding: 4px 8px; }
+button.ghost:hover:not(:disabled) { background: #f0f6ff; }
+button.active-like { background: #ff2d55; }
+button.active-fav { background: #ffcc00; color: #1d1d1f; }
+
+.hint { color: #6e6e73; font-size: 12px; margin-top: 10px; line-height: 1.7; }
+.empty {
+  text-align: center;
+  color: #86868b;
+  padding: 40px 0;
+}
+
+/* --------------------- 标签 chip & 搜索条（新增功能） --------------------- */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #92400e;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: transform .1s ease, box-shadow .1s ease, background .15s ease;
+  border: 1px solid #fcd34d;
+}
+.tag-chip:hover:not(.input-chip) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(251, 191, 36, 0.3);
+}
+.tag-chip.active-tag {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  color: #fff;
+  border-color: #1d4ed8;
+}
+.tag-chip.input-chip {
+  cursor: default;
+  padding-right: 2px;
+}
+.chip-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.65;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.chip-close:hover {
+  opacity: 1;
+  background: rgba(0,0,0,0.07);
+}
+
+.search-panel { padding: 16px 18px; }
+.search-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.search-row > input, .search-row > label > input {
+  flex: 1 1 200px;
+}
+.search-row input[type="date"] {
+  flex: 0 1 170px;
+}
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 12px;
+}
+.filter-badge b { font-weight: 600; margin: 0 2px; }
+.filter-badge .chip-close {
+  font-size: 16px;
+  padding: 0 5px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.filter-badge .chip-close:hover { opacity: 1; background: rgba(55,48,163,0.08); border-radius: 999px; }
+
+/* --------------------- 广场：左右分栏（主区 + 右侧列） --------------------- */
+.forum-layout {
+  display: flex;
+  gap: 32px;               /* 主区与右侧列间距拉大，搜索部分更靠右 */
+  align-items: flex-start;
+}
+.forum-main {
+  flex: 1 1 auto;
+  min-width: 0;            /* 防止 flex 子项撑破容器 */
+}
+/* 右侧列：包裹"发新帖"按钮 + 搜索面板，整体 sticky 浮动 */
+.forum-side-col {
+  flex: 0 0 270px;
+  max-width: 280px;
+  margin-left: auto;       /* 往右贴，左侧主区更大 */
+  position: sticky;
+  top: 72px;               /* 避开 sticky topbar */
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;        /* 内容过多时整列可滚动 */
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;              /* 两个独立框之间的间距 */
+}
+/* 发新帖按钮（独立框，与搜索面板等宽、同圆角） */
+.forum-newpost-btn {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #2563eb;
+  color: #fff;
+  border: 1px solid #1d4ed8;
+  border-radius: 14px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(37,99,235,0.15);
+  transition: background .15s;
+}
+.forum-newpost-btn:hover { background: #1d4ed8; }
+/* 搜索面板（独立框，不再自己 sticky，由父列容器统一浮动） */
+.forum-aside {
+  margin-bottom: 0;        /* 由父列 gap 控制间距 */
+  border-radius: 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.forum-aside .search-row > input { flex: 1 1 100%; }
+@media (max-width: 760px) {
+  .forum-layout { flex-direction: column; gap: 14px; }
+  .forum-side-col {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+    position: static;       /* 窄屏恢复自然流 */
+    max-height: none;
+    overflow: visible;
+    order: -1;              /* 窄屏时右侧列移到列表上方 */
+  }
+}
+
+
+/* --------------------- 工具条 --------------------- */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 0 2px;
+}
+.toolbar .tab-bar { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab-bar button {
+  background: transparent; color: #1d1d1f; border: 1px solid #e5e5e7;
+  padding: 5px 12px; font-size: 13px;
+}
+.tab-bar button.on { background: #0071e3; color: #fff; border-color: #0071e3; }
+
+/* --------------------- 帖子详情 & 工具按钮 --------------------- */
+.detail-header h2 { font-size: 22px; margin-bottom: 10px; }
+.detail-body { white-space: pre-wrap; font-size: 15px; line-height: 1.7; margin: 10px 0 14px; }
+.action-bar {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding-top: 10px; border-top: 1px solid #e5e5e7;
+}
+
+/* --------------------- 评论区 --------------------- */
+.comments-section { margin-top: 20px; }
+.comments-section h3 { font-size: 15px; padding: 8px 0; border-bottom: 1px solid #e5e5e7; margin-bottom: 12px; }
+.comment-box { margin-bottom: 14px; }
+.comment-list { margin: 8px 0 0; }
+.comment-item {
+  padding: 12px 12px 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fafafa;
+  border: 1px solid #eee;
+}
+.comment-item.reply {
+  margin-left: 34px;
+  background: #fff;
+  border-left: 3px solid #0071e3;
+  padding-left: 10px;
+}
+.comment-header {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: #6e6e73; margin-bottom: 6px;
+}
+.comment-author { font-weight: 500; color: #1d1d1f; }
+.reply-ref { color: #6e6e73; font-size: 12px; margin-bottom: 4px; }
+.reply-ref b { color: #1d1d1f; }
+.comment-content { font-size: 14px; word-break: break-word; }
+.comment-content.deleted { color: #999; font-style: italic; }
+.comment-actions { margin-top: 6px; }
+.reply-input {
+  margin-top: 8px;
+  display: none;
+}
+.reply-input.open { display: block; }
+
+/* --------------------- 私信页面 --------------------- */
+.messages-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .messages-layout { grid-template-columns: 1fr; }
+}
+.conv-list { background: #fff; border: 1px solid #e5e5e7; border-radius: 10px; overflow: hidden; max-height: 70vh; overflow-y: auto; }
+.conv-item {
+  padding: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  display: flex; gap: 10px; align-items: center;
+}
+.conv-item:hover { background: #fafafa; }
+.conv-item.on { background: #f0f6ff; border-left: 3px solid #0071e3; padding-left: 9px; }
+.conv-pinned {
+  background: linear-gradient(90deg, rgba(37,99,235,0.04), rgba(37,99,235,0));
+  border-bottom: 1px solid #dbeafe;
+  position: sticky; top: 0; z-index: 1;
+}
+.conv-pinned:hover { background: linear-gradient(90deg, rgba(37,99,235,0.08), rgba(37,99,235,0)); }
+.pinned-badge {
+  display: inline-block; font-size: 11px; background: #dbeafe; color: #1d4ed8;
+  padding: 1px 5px; border-radius: 4px; flex-shrink: 0; margin-right: 2px;
+}
+.conv-name { font-weight: 500; display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.conv-preview { color: #86868b; font-size: 12px; margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 180px; }
+.msg-pane {
+  background: #fff;
+  border: 1px solid #e5e5e7;
+  border-radius: 10px;
+  display: flex; flex-direction: column;
+  min-height: 480px; max-height: 70vh;
+}
+.msg-pane h3 { padding: 12px 16px; border-bottom: 1px solid #e5e5e7; margin-bottom: 0; }
+.msg-list { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: #f5f5f7; }
+.msg-bubble {
+  max-width: 75%; padding: 8px 12px; border-radius: 14px; font-size: 14px; word-break: break-word;
+}
+.msg-bubble.mine { background: #0071e3; color: #fff; align-self: flex-end; border-bottom-right-radius: 3px; }
+.msg-bubble.theirs { background: #fff; color: #1d1d1f; border: 1px solid #e5e5e7; border-bottom-left-radius: 3px; align-self: flex-start; }
+.msg-meta { font-size: 10px; color: #999; margin-top: 2px; text-align: right; }
+.msg-bubble.theirs .msg-meta { text-align: left; }
+.msg-input {
+  display: flex; padding: 10px; border-top: 1px solid #e5e5e7; gap: 6px; background: #fff;
+}
+.msg-input textarea { margin-bottom: 0; min-height: 38px; max-height: 100px; flex: 1; }
+.msg-input button { align-self: flex-end; }
+.new-dm-row { padding: 10px; border-bottom: 1px solid #eee; display: flex; gap: 6px; }
+.new-dm-row input { margin-bottom: 0; flex: 1; }
+
+/* --------------------- 公告弹窗 --------------------- */
+.modal-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center; z-index: 99;
+  padding: 20px;
+}
+.modal {
+  background: #fff; border-radius: 12px; width: 100%; max-width: 520px;
+  max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+}
+.modal-header {
+  padding: 14px 18px; border-bottom: 1px solid #eee;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.modal-header .badge-pin {
+  background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 6px;
+}
+.modal-title { font-size: 16px; font-weight: 600; }
+.modal-body { padding: 18px; overflow-y: auto; font-size: 14px; white-space: pre-wrap; }
+.modal-footer { padding: 12px 18px; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #86868b; }
+
+/* --------------------- 管理员面板：账号表格 / 状态徽章 / 迷你操作按钮 --------------------- */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.admin-table th {
+  text-align: left;
+  color: #6b7280;
+  padding: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+.admin-table td {
+  padding: 8px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+.admin-table tr:hover td { background: #f9fafb; }
+.admin-table .action-cell {
+  white-space: nowrap;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+/* 迷你按钮（表格内操作） */
+.btn-mini {
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  margin: 0;
+  transition: filter .15s, opacity .15s;
+}
+.btn-mini:hover:not(:disabled) { filter: brightness(0.92); }
+.btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-mini.btn-danger { background: #ef4444; }
+.btn-mini.btn-danger:hover:not(:disabled) { background: #dc2626; }
+.btn-mini.btn-warning { background: #f59e0b; }
+.btn-mini.btn-warning:hover:not(:disabled) { background: #d97706; }
+.btn-mini.btn-success { background: #10b981; }
+.btn-mini.btn-success:hover:not(:disabled) { background: #059669; }
+/* 状态徽章 */
+.status-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.status-badge.status-normal { background: #dcfce7; color: #15803d; }
+.status-badge.status-banned { background: #fee2e2; color: #b91c1c; }
+
+/* --------------------- 个人中心 --------------------- */
+.profile-header {
+  background: linear-gradient(135deg, #0071e3, #5ac8fa);
+  color: #fff; border-radius: 10px; padding: 20px;
+  display: flex; align-items: center; gap: 16px; margin-bottom: 12px;
+}
+.avatar-lg {
+  width: 72px; height: 72px; border-radius: 50%;
+  background: #fff; display: flex; align-items: center; justify-content: center;
+  color: #0071e3; font-weight: 700; font-size: 28px;
+}
+.profile-name { font-size: 20px; font-weight: 600; }
+.profile-uid { opacity: 0.85; font-size: 13px; margin-top: 4px; }
+.profile-bio { margin-top: 8px; opacity: 0.95; font-size: 13px; }
+
+/* ---- 头像图片覆盖层：首字母占位 + 图片绝对覆盖（加载失败 onerror 隐藏 → 露出首字母）---- */
+.avatar-lg, .avatar-sm { position: relative; overflow: hidden; }
+.avatar-lg .avatar-initials, .avatar-sm .avatar-initials { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.avatar-lg .avatar-img, .avatar-sm .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---- 小头像（顶栏 / 帖子卡作者区）---- */
+.avatar-sm {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #fff; display: inline-flex; align-items: center; justify-content: center;
+  color: #0071e3; font-weight: 700; font-size: 13px; flex-shrink: 0;
+}
+.nav-avatar { width: 30px; height: 30px; font-size: 14px; }
+.post-avatar { width: 22px; height: 22px; font-size: 11px; }
+
+/* ---- 超小头像（评论区）---- */
+.avatar-xs {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; display: inline-flex; align-items: center; justify-content: center;
+  color: #0071e3; font-weight: 700; font-size: 10px; flex-shrink: 0;
+  overflow: hidden; position: relative;
+}
+.avatar-xs .avatar-initials { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.avatar-xs .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---- 等级徽章（帖子卡 + 评论区通用）---- */
+.level-badge {
+  font-size: 10px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  padding: 1px 6px; border-radius: 8px; line-height: 1.4; white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(249,115,22,.25);
+  vertical-align: middle;
+}
+.level-badge.admin {
+  background: linear-gradient(135deg, #dc2626, #f59e0b);
+  box-shadow: 0 1px 3px rgba(220,38,38,.4);
+}
+
+/* ---- 帖子作者区域 ---- */
+.post-author { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.post-author-name { font-size: 13px; color: #374151; font-weight: 500; }
+
+/* ---- 评论作者区域 ---- */
+.comment-author-info {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  color: inherit; text-decoration: none;
+}
+.comment-author-info:hover { color: #0071e3; }
+.comment-avatar { margin-right: 2px; }
+.comment-author { font-weight: 500; color: #374151; }
+
+/* 紧凑卡片作者信息 */
+.wfall-author { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.wfall-author:hover { color: #0071e3; }
+
+/* ---- 顶栏所在区域徽标（依据 UID 推断，头像左侧）---- */
+.nav-region { font-size: 11px; color: #374151; background: #f3f4f6; padding: 2px 8px; border-radius: 10px; white-space: nowrap; line-height: 1.4; }
+.nav-region-select { font-size: 11px; color: #374151; background: #f3f4f6; padding: 2px 6px; border-radius: 10px; border: 1px solid #e5e7eb; line-height: 1.4; cursor: pointer; max-width: 130px; }
+/* 标准账号下拉框锁定状态：可点击展开但无权切换，虚线边框提示 */
+.nav-region-locked { cursor: not-allowed; border-style: dashed; border-color: #d1d5db; }
+/* "其他"账号徽标：区别于标准分区徽标，放在下拉框右侧 */
+.nav-region-other { color: #92400e; background: #fef3c7; margin-left: 4px; }
+
+/* ---- 顶栏等级徽标（点击进积分页）---- */
+.nav-level {
+  font-size: 11px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #f59e0b, #f97316);
+  padding: 2px 8px; border-radius: 10px; line-height: 1.4; white-space: nowrap;
+  text-decoration: none; box-shadow: 0 1px 2px rgba(249,115,22,.3);
+}
+.nav-level:hover { text-decoration: none; filter: brightness(1.05); }
+
+/* ---- 顶栏系统消息铃铛 ---- */
+.nav-bell {
+  position: relative; font-size: 17px; line-height: 1; color: #1d1d1f;
+  padding: 4px 8px; border-radius: 8px; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.nav-bell:hover { background: #f3f4f6; text-decoration: none; }
+.nav-bell .unread-badge { position: absolute; top: -2px; right: -2px; }
+
+/* ---- 积分等级页 ---- */
+.exp-hero { display: flex; flex-direction: column; gap: 14px; }
+.exp-level-row { display: flex; align-items: center; gap: 14px; }
+.exp-level-badge {
+  font-size: 22px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+  width: 64px; height: 64px; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 10px rgba(249,115,22,.35);
+}
+.exp-level-title { font-size: 16px; font-weight: 600; color: #1d1d1f; }
+.exp-points { font-size: 13px; color: #6b7280; margin-top: 2px; }
+.exp-progress-wrap { display: flex; flex-direction: column; gap: 6px; }
+.exp-progress-bar { height: 10px; background: #f3f4f6; border-radius: 999px; overflow: hidden; }
+.exp-progress-fill {
+  height: 100%; background: linear-gradient(90deg, #f59e0b, #f97316);
+  border-radius: 999px; transition: width .4s ease;
+}
+.exp-progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; flex-wrap: wrap; gap: 4px; }
+.exp-rules { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.exp-rules li { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #f9fafb; border-radius: 8px; gap: 8px; }
+.exp-rule-key { font-size: 13px; color: #1d1d1f; }
+.exp-rule-val { font-size: 12px; color: #b45309; font-weight: 600; text-align: right; }
+.exp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.exp-table th, .exp-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #f0f0f2; }
+.exp-table th { color: #6b7280; font-weight: 600; background: #f9fafb; }
+.exp-cur-level td { background: #fff7ed; font-weight: 600; }
+
+/* ---- 系统消息列表 ---- */
+.notif-item {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f2; cursor: pointer; position: relative;
+  transition: background .15s;
+}
+.notif-item:hover { background: #f9fafb; }
+.notif-item:last-child { border-bottom: none; }
+.notif-unread { background: #fff7ed; }
+.notif-unread:hover { background: #fff4e6; }
+.notif-icon { font-size: 18px; line-height: 1.4; flex-shrink: 0; }
+.notif-body { flex: 1; min-width: 0; }
+.notif-content { font-size: 14px; color: #1d1d1f; line-height: 1.5; word-break: break-word; }
+.notif-meta { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+.notif-dot {
+  position: absolute; top: 14px; right: 10px;
+  width: 8px; height: 8px; border-radius: 50%; background: #f97316; flex-shrink: 0;
+}
+
+/* ---- 顶栏用户区（头像+昵称）可点击进「我的」---- */
+.nav-user { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 2px 6px; border-radius: 8px; transition: background .15s; }
+.nav-user:hover { background: rgba(0,0,0,0.05); }
+
+/* ---- 帖子卡作者区（头像+昵称）可点击进作者主页 ---- */
+.post-author { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: #0071e3; }
+.post-author:hover { text-decoration: underline; }
+.post-author-name { font-weight: 500; }
+
+/* ---- 个人资料编辑表单 ---- */
+.profile-edit-row { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.profile-edit-avatar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.profile-edit-avatar-actions label.secondary {
+  display: inline-block; cursor: pointer; user-select: none;
+  background: #e5e5e7; color: #1d1d1f;
+  padding: 6px 12px; border-radius: 8px; font-size: 14px; line-height: 1.4;
+  transition: background .15s;
+}
+.profile-edit-avatar-actions label.secondary:hover { background: #dcdce0; }
+.field-label { display: block; font-size: 13px; color: #1d1d1f; margin: 8px 0 4px; font-weight: 500; }
+
+/* ==================== 签到板块（独立卡片）==================== */
+.checkin-card { background: linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%); border: 1px solid #fed7aa; }
+.checkin-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.checkin-info .checkin-date { font-size: 16px; font-weight: 600; color: #c2410c; }
+.checkin-info .checkin-streak { font-size: 14px; color: #9a3412; margin-top: 4px; }
+.checkin-info .checkin-streak b { color: #ea580c; font-size: 18px; }
+.checkin-btn button {
+  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+  color: #fff; border: none; padding: 10px 24px;
+  border-radius: 10px; font-size: 15px; font-weight: 600;
+  cursor: pointer; box-shadow: 0 2px 8px rgba(234,88,12,0.3);
+  transition: transform .15s, box-shadow .15s;
+}
+.checkin-btn button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(234,88,12,0.4); }
+.checkin-btn button:disabled { background: #d4d4d8; box-shadow: none; }
+.checkin-fortune {
+  margin-top: 14px; padding: 10px 14px;
+  background: #fff; border-radius: 10px;
+  border: 1px dashed #fed7aa;
+  display: flex; align-items: center; gap: 10px;
+}
+.checkin-fortune-emoji { font-size: 26px; line-height: 1; }
+.checkin-fortune-text { font-size: 14px; }
+.checkin-fortune-text b { font-size: 16px; margin-left: 2px; }
+
+/* ==================== 签到日历（独立卡片）==================== */
+.ckin-cal-card { background: #fff; }
+.ckin-cal-toolbar {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;
+}
+.ckin-cal-label {
+  font-size: 14px; font-weight: 600; color: #1f2937; display: flex; align-items: center; gap: 6px;
+}
+.ckin-cal-label select {
+  padding: 3px 6px; border-radius: 6px; border: 1px solid #d2d2d7; font-size: 13px;
+  background: #fff; cursor: pointer;
+}
+.ckin-cal-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 4px;
+}
+.ckin-cal-weekdays span {
+  text-align: center; font-size: 12px; font-weight: 600; color: #6b7280;
+  padding: 4px 0; background: #f9fafb; border-radius: 4px;
+}
+.ckin-cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+}
+.ckin-cell {
+  aspect-ratio: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-size: 13px; border-radius: 8px; background: #f9fafb; color: #374151;
+  position: relative; line-height: 1.2;
+}
+.ckin-cell.empty { background: transparent; }
+.ckin-cell.checked {
+  background: linear-gradient(135deg, #f97316 0%, #fb923c 100%);
+  color: #fff; font-weight: 600;
+}
+.ckin-cell.checked em { font-style: normal; font-size: 10px; opacity: .85; }
+.ckin-cell.today { border: 2px solid #ea580c; font-weight: 700; color: #ea580c; }
+.ckin-cell.checked.today { border: 2px solid #fff; color: #fff; box-shadow: 0 0 0 2px #ea580c; }
+
+/* ==================== 广场展示设置板块 ==================== */
+.forum-view-switch { padding: 10px 12px; }
+.forum-view-title { font-size: 13px; font-weight: 600; color: #1f2937; margin-bottom: 8px; }
+.forum-view-btns { display: flex; gap: 6px; }
+.forum-view-btn {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 4px; border-radius: 8px; border: 1px solid #d2d2d7;
+  background: #fff; color: #6b7280; font-size: 11px; cursor: pointer;
+  transition: all .15s ease;
+}
+.forum-view-btn:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
+.forum-view-btn.active {
+  border-color: #2563eb; color: #2563eb; background: #eff6ff;
+  box-shadow: 0 0 0 1px rgba(37,99,235,.2);
+}
+.forum-view-icon { font-size: 16px; line-height: 1; }
+
+/* ==================== 卡片九宫格 ==================== */
+.cards-grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 1200px) { .cards-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 800px)  { .cards-grid { grid-template-columns: 1fr; } }
+
+.wfall-card { margin-bottom: 0; } /* grid 已通过 gap 控制间距 */
+
+.wfall-card {
+  background: #fff; border-radius: 12px; overflow: hidden;
+  border: 1px solid #f0f0f0;
+  cursor: pointer; transition: transform .15s, box-shadow .15s, border-color .15s;
+  position: relative;
+}
+.wfall-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.08);
+  border-color: #d1d5db;
+}
+.wfall-pinned {
+  position: absolute; top: 6px; left: 6px; z-index: 2;
+  background: #fef3c7; color: #b45309; padding: 2px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 600;
+}
+.wfall-cover {
+  width: 100%; overflow: hidden; background: #f3f4f6;
+}
+.wfall-cover img {
+  width: 100%; height: auto; display: block; object-fit: cover;
+  transition: transform .3s;
+}
+.wfall-card:hover .wfall-cover img { transform: scale(1.04); }
+.wfall-cover-text {
+  padding: 28px 14px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+.wfall-emoji { font-size: 28px; }
+.wfall-text-short {
+  font-size: 12px; color: #64748b; text-align: center;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.5;
+}
+.wfall-body { padding: 10px 12px 12px; }
+.wfall-body h4 {
+  font-size: 14px; font-weight: 600; color: #1f2937; margin: 0 0 6px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.4;
+}
+.wfall-meta {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: #6b7280; margin-bottom: 4px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.wfall-meta span:first-child { flex-shrink: 0; }
+.wfall-tags {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;
+}
+.wfall-tags span {
+  font-size: 11px; color: #2563eb; background: #eff6ff;
+  padding: 1px 6px; border-radius: 4px;
+}
+.wfall-stats {
+  display: flex; gap: 10px;
+  font-size: 11px; color: #9ca3af; padding-top: 6px;
+  border-top: 1px dashed #f0f0f0;
+}
+
+/* ==================== 公会系统 ==================== */
+
+/* 公会徽章（显示在昵称/头像前） */
+.guild-badge {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 11px; font-weight: 500; color: #7c3aed;
+  background: #ede9fe;
+  padding: 1px 6px; border-radius: 10px;
+  margin-left: 6px; cursor: pointer;
+  transition: background .15s;
+  vertical-align: middle;
+}
+.guild-badge:hover { background: #ddd6fe; }
+
+/* 公会卡片网格 */
+.guild-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.guild-card {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+  padding: 16px; cursor: pointer;
+  transition: transform .15s, box-shadow .15s, border-color .15s;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.guild-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.08);
+  border-color: #c4b5fd;
+}
+
+.guild-icon {
+  width: 48px; height: 48px; font-size: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+  border-radius: 12px; flex-shrink: 0;
+}
+.guild-card .guild-body { flex: 1; min-width: 0; }
+.guild-card .guild-name {
+  font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.guild-card .guild-desc {
+  font-size: 12px; color: #6b7280; margin-bottom: 6px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.4;
+}
+.guild-card .guild-meta { font-size: 11px; color: #9ca3af; }
+
+/* 公会详情页头部 */
+.guild-detail-header { text-align: center; padding: 28px 20px; }
+.guild-detail-header .guild-icon {
+  width: 80px; height: 80px; font-size: 48px;
+  margin: 0 auto 14px;
+  border-radius: 20px;
+}
+.guild-detail-header .guild-name {
+  font-size: 22px; font-weight: 700; color: #1f2937; margin-bottom: 4px;
+}
+.guild-detail-header .guild-desc {
+  font-size: 13px; color: #6b7280; margin-bottom: 10px;
+}
+.guild-detail-header .guild-meta {
+  font-size: 12px; color: #9ca3af; margin-bottom: 16px;
+}
+.guild-detail-header .guild-actions {
+  display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;
+}
+
+/* 公会成员列表 */
+.guild-member-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.guild-member {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border: 1px solid #f3f4f6; border-radius: 8px;
+  cursor: pointer; transition: background .15s;
+}
+.guild-member:hover { background: #f9fafb; border-color: #e5e7eb; }
+.guild-member-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #e5e7eb; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: #6b7280; flex-shrink: 0;
+  overflow: hidden;
+}
+.guild-member-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.guild-member-name {
+  font-size: 13px; color: #1f2937;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+.guild-member-role {
+  font-size: 10px; padding: 1px 5px; border-radius: 4px; flex-shrink: 0;
+}
+.guild-member-role.role-owner { background: #fef3c7; color: #92400e; }
+.guild-member-role.role-admin { background: #ede9fe; color: #7c3aed; }
+.guild-member-role.role-member { background: #f3f4f6; color: #6b7280; }
+
+/* 管理员公会管理面板 */
+.admin-guild-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px;
+  margin-bottom: 6px; flex-wrap: wrap;
+}
+.admin-guild-row.ag-banned { opacity: .75; border-color: #fecaca; background: #fef2f2; }
+.admin-guild-row .ag-icon { font-size: 22px; width: 32px; text-align: center; }
+.admin-guild-row .ag-info { flex: 1; min-width: 160px; }
+.admin-guild-row .ag-name { font-size: 14px; font-weight: 600; color: #1f2937; }
+.admin-guild-row .ag-sub { font-size: 11px; color: #9ca3af; margin-top: 2px; }
+.admin-guild-row .ag-status {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+}
+.admin-guild-row .ag-status.s-active { background: #dcfce7; color: #15803d; }
+.admin-guild-row .ag-status.s-banned { background: #fee2e2; color: #dc2626; }
+.admin-guild-row .ag-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.admin-guild-row .ag-actions button {
+  font-size: 11px; padding: 3px 8px; border-radius: 5px; border: 1px solid #e5e7eb;
+  background: #fff; cursor: pointer;
+}
+.admin-guild-row .ag-actions button:hover { background: #f3f4f6; }
+.admin-guild-row .ag-actions button.danger { border-color: #fecaca; color: #dc2626; background: #fff; }
+.admin-guild-row .ag-actions button.danger:hover { background: #fef2f2; }
+.admin-guild-row .ag-actions button.warn { border-color: #fde68a; color: #92400e; background: #fffbeb; }
+.admin-guild-row .ag-actions button.warn:hover { background: #fef3c7; }
+
+.admin-guild-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.admin-guild-tabs button {
+  padding: 5px 12px; border: 1px solid #e5e7eb; border-radius: 16px;
+  background: #fff; font-size: 12px; cursor: pointer; color: #4b5563;
+}
+.admin-guild-tabs button.active {
+  background: #7c3aed; color: #fff; border-color: #7c3aed;
+}
+
+.admin-guild-detail {
+  border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; margin-bottom: 12px;
+  background: #fafafa;
+}
+.admin-guild-detail h4 { margin: 0 0 10px; font-size: 14px; color: #1f2937; }
+
+.admin-guild-member-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 6px; font-size: 12px;
+}
+.admin-guild-member-row:hover { background: #f3f4f6; }
+.admin-guild-member-row .agm-name { flex: 1; color: #374151; }
+.admin-guild-member-row .agm-uid { color: #9ca3af; font-family: monospace; font-size: 11px; }
+.admin-guild-member-row button {
+  font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #e5e7eb;
+  background: #fff; cursor: pointer;
+}
+.admin-guild-member-row button.danger { border-color: #fecaca; color: #dc2626; }
+
+.admin-request-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px;
+  margin-bottom: 4px; font-size: 12px; flex-wrap: wrap;
+}
+.admin-request-row.pending { border-color: #fde68a; background: #fffbeb; }
+.admin-request-row .ar-info { flex: 1; min-width: 200px; }
+.admin-request-row .ar-title { font-weight: 500; color: #1f2937; }
+.admin-request-row .ar-sub { color: #6b7280; font-size: 11px; margin-top: 2px; }
+.admin-request-row .ar-actions { display: flex; gap: 4px; }
+.admin-request-row button {
+  font-size: 11px; padding: 3px 10px; border-radius: 5px; border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+.admin-request-row button.approve { background: #dcfce7; color: #15803d; border-color: #86efac; }
+.admin-request-row button.reject { background: #fee2e2; color: #dc2626; border-color: #fecaca; }
+.admin-request-row .ar-status {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px; flex-shrink: 0;
+}
+.admin-request-row .ar-status.pending { background: #fef3c7; color: #92400e; }
+.admin-request-row .ar-status.approved { background: #dcfce7; color: #15803d; }
+.admin-request-row .ar-status.rejected { background: #fee2e2; color: #dc2626; }

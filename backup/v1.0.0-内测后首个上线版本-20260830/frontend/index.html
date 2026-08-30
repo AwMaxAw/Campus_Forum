@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>广五校园论坛</title>
+  <meta name="description" content="广五校园论坛 - 师生交流平台">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%230071e3'/><text x='50%25' y='55%25' text-anchor='middle' font-family='-apple-system,sans-serif' font-size='38' font-weight='700' fill='white'>5</text></svg>">
+  <link rel="stylesheet" href="css/style.css?v=20260829-guild">
+</head>
+<body>
+  <header class="topbar">
+    <button id="menuToggle" class="menu-toggle" aria-label="打开导航菜单">☰</button>
+    <h1><a href="#home">📚 广五校园论坛</a></h1>
+    <div id="topNav" class="topbar-nav"></div>
+  </header>
+
+  <!-- 左侧抽屉遮罩 -->
+  <div id="drawerOverlay" class="drawer-overlay"></div>
+  <!-- 左侧抽屉 -->
+  <aside id="sideDrawer" class="side-drawer">
+    <div class="drawer-header">
+      <span class="drawer-title">导航</span>
+      <button id="drawerClose" class="drawer-close" aria-label="关闭">✕</button>
+    </div>
+    <nav id="drawerNav" class="drawer-nav"></nav>
+  </aside>
+
+  <main id="app"></main>
+
+  <script type="module" src="js/app.js?v=20260830-admin-sub-fix"></script>
+</body>
+</html>

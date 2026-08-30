@@ -1,0 +1,4957 @@
+/**
+ * 广五校园论坛 - 前端主逻辑
+ *
+ * 路由（hash 路由，location.hash 变更触发 route()）：
+ *   #home                封面页（欢迎页 + 动画占位，未登录也能看）
+ *   #forum               广场 - 帖子列表（需登录）
+ *   #login               登录
+ *   #register            注册
+ *   #post                发新帖（需登录）
+ *   #detail/:id          帖子详情 + 评论区 + 楼中楼 + 点赞/收藏
+ *   #me                  个人中心（我的帖 / 我点赞 / 我收藏 三个 tab）
+ *   #messages            私信（会话列表 + 对话窗 + 发起新对话）
+ *   #announcements       公告历史（所有公告列表）
+ *
+ * 全局行为：
+ *   - 页面加载时：调 /api/auth/me 静默刷新 token，过期即清登录态
+ *   - 已登录用户：拉未读公告 → 逐条弹窗"已读/下一条"
+ *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
+ */
+
+import * as api from './api.js?v=20260830-admin-auth-fix';
+
+// ==================== 工具函数 ====================
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+/** 把字面量 \n / \r\n 转为真正换行符（兼容历史脏数据） */
+function normalizeNewlines(s) {
+  return String(s == null ? '' : s).replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+}
+function formatTime(iso) {
+  if (!iso) return '';
+  try {
+    // 后端 datetime('now') 存的是 UTC，但返回格式是 "2026-08-28 12:00:00"（无 Z 后缀）。
+    // 不同浏览器对无后缀时间字符串的解析不一致：有的当本地时间，有的当 UTC。
+    // 统一显式标记为 UTC → 浏览器自动 getHours() 转为用户本地时间（北京时间 UTC+8）。
+    let fixed = String(iso).trim();
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(fixed) && !/[Zz]|[+-]\d{2}:?\d{2}$/.test(fixed)) {
+      fixed = fixed.replace(' ', 'T') + 'Z';
+    }
+    const d = new Date(fixed);
+    if (isNaN(d.getTime())) return iso;
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  } catch { return iso; }
+}
+
+/** 渲染公会徽章（如果用户在公会中则显示） */
+function guildBadge(author) {
+  if (!author) return '';
+  const name = author.authorGuildName || author.guildName;
+  const icon = author.authorGuildIcon || author.guildIcon || '🏰';
+  if (!name) return '';
+  const id = author.authorGuildId || author.guildId;
+  const title = `${icon} ${escapeHtml(name)}`;
+  const onclick = id ? `onclick="event.stopPropagation();location.hash='#guild/${id}'"` : '';
+  return `<span class="guild-badge" title="${title}" ${onclick}>${icon} ${escapeHtml(name)}</span>`;
+}
+
+/**
+ * 图片压缩：使用 Canvas 将图片缩放到最大宽高 1280px，输出为 JPEG data URL。
+ * 输入: File 对象
+ * 输出: Promise<{ dataUrl, width, height, size, filename }>
+ * - dataUrl: "data:image/jpeg;base64,..."
+ * - width/height: 压缩后像素
+ * - size: 压缩后字节数
+ * 如果原图 ≤1280px 且 <1MB，直接返回原图（仅转为 JPEG 格式统一）
+ */
+function compressImage(file, maxDim = 1280, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = e => {
+      img.onload = () => {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        let newW = w, newH = h;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { newW = maxDim; newH = Math.round(h * maxDim / w); }
+          else { newH = maxDim; newW = Math.round(w * maxDim / h); }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = newW;
+        canvas.height = newH;
+        const ctx = canvas.getContext('2d');
+        // 白底（处理 PNG 透明背景）
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, newW, newH);
+        ctx.drawImage(img, 0, 0, newW, newH);
+        canvas.toBlob(
+          blob => {
+            if (!blob) { reject(new Error('Canvas 导出失败')); return; }
+            const reader2 = new FileReader();
+            reader2.onload = e2 => {
+              resolve({
+                dataUrl: e2.target.result,
+                width: newW,
+                height: newH,
+                size: blob.size,
+                filename: file.name,
+              });
+            };
+            reader2.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => reject(new Error('图片加载失败'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ==================== 分区元数据 ====================
+const CATEGORIES = api.CATEGORIES || [
+  { key: 'general', label: '综合', cssColor: '#6b7280' },
+  { key: 'study',   label: '学习', cssColor: '#2563eb' },
+  { key: 'club',    label: '社团', cssColor: '#9333ea' },
+  { key: 'life',    label: '生活', cssColor: '#059669' },
+  { key: 'meta',    label: '站务', cssColor: '#dc2626', adminOnly: true },
+];
+const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map(c => [c.key, c.label]));
+const CATEGORY_COLOR = Object.fromEntries(CATEGORIES.map(c => [c.key, c.cssColor || '#6b7280']));
+function categoryBadgeHtml(key, opts = {}) {
+  const label = CATEGORY_LABEL[key] || key;
+  const color = CATEGORY_COLOR[key] || '#6b7280';
+  const light = toLightBg(color);
+  const clickAttrs = opts.clickable
+    ? `onclick="event.stopPropagation();setHomeFilter('category',${escapeHtml(JSON.stringify(key))})" title="按「${label}」分区筛选"`
+    : '';
+  const cursor = opts.clickable ? 'cursor:pointer;' : '';
+  if (opts.compact) {
+    return `<span ${clickAttrs} style="${cursor}color:${color};background:${light};padding:0 5px;border-radius:8px;font-size:10px;margin-right:4px;font-weight:500;line-height:16px">${escapeHtml(label)}</span>`;
+  }
+  return `<span ${clickAttrs} style="${cursor}color:${color};background:${light};padding:1px 8px;border-radius:12px;font-size:12px;margin-right:6px;font-weight:500">${escapeHtml(label)}</span>`;
+}
+function toLightBg(hex) {
+  // #RRGGBB → 250 左右浅色背景（和文字颜色同色相）
+  const h = hex.replace('#', '');
+  if (h.length !== 6) return '#f3f4f6';
+  const r = Math.round((parseInt(h.slice(0, 2), 16) + 255 * 9) / 10);
+  const g = Math.round((parseInt(h.slice(2, 4), 16) + 255 * 9) / 10);
+  const b = Math.round((parseInt(h.slice(4, 6), 16) + 255 * 9) / 10);
+  return `rgb(${r},${g},${b})`;
+}
+
+// ==================== 顶栏 ====================
+// 根据 UID 推断所在区域（与运维管理员面板的分组规则一致）：
+// 2611 → 广五本部初中部，2612 → 广五本部高中部，2621 → 金碧校区初中部，2622 → 金碧校区高中部
+// 261/262 但学段位非 1/2 → 仅校区；其他 → 其他
+function uidToRegion(uid) {
+  const s = String(uid || '');
+  if (/^2611/.test(s)) return '广五本部初中部';
+  if (/^2612/.test(s)) return '广五本部高中部';
+  if (/^2621/.test(s)) return '金碧校区初中部';
+  if (/^2622/.test(s)) return '金碧校区高中部';
+  if (/^261/.test(s))  return '广五本部';
+  if (/^262/.test(s))  return '金碧校区';
+  return '其他';
+}
+// 4 个标准分区的 UID 前缀；非标准 UID（管理员/其他）返回 null，这类账号可用下拉框切换查看任意分区
+function uidToRegionPrefix(uid) {
+  const s = String(uid || '');
+  if (/^2611/.test(s)) return '2611';
+  if (/^2612/.test(s)) return '2612';
+  if (/^2621/.test(s)) return '2621';
+  if (/^2622/.test(s)) return '2622';
+  return null;
+}
+// 4 个分区列表（供"其他"账号下拉框切换用）
+const REGIONS = [
+  { prefix: '2611', label: '广五本部初中部' },
+  { prefix: '2612', label: '广五本部高中部' },
+  { prefix: '2621', label: '金碧校区初中部' },
+  { prefix: '2622', label: '金碧校区高中部' },
+];
+
+async function renderTopBar() {
+  const loggedIn = api.isLoggedIn();
+  const me = loggedIn ? api.getCurrentUser() : null;
+  const nav = document.getElementById('topNav');
+  if (!nav) return;
+
+  let unreadMsg = 0;
+  if (loggedIn) {
+    try {
+      const r = await api.messages.unreadCount();
+      if (r.success) unreadMsg = r.data.count || 0;
+    } catch {}
+  }
+  // 系统通知未读数（导航栏铃铛红点）
+  let unreadNotif = 0;
+  if (loggedIn) {
+    try {
+      const r2 = await api.notifications.unreadCount();
+      if (r2.success) unreadNotif = r2.data.count || 0;
+    } catch {}
+  }
+
+  // 若 me 是旧登录态（还没有 guildName 字段），调用 /me 刷新一次用户缓存（api.auth.me 内部会更新 userCache + localStorage）
+  if (loggedIn && me && me.guildName === undefined && me.guildId === undefined) {
+    try { await api.auth.me(); } catch {}
+  }
+
+  if (loggedIn && me) {
+    let roleBadge = '';
+    if (me.role === 'ops_admin') {
+      roleBadge = `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`;
+    } else if (me.role === 'admin') {
+      roleBadge = `<span style="color:#1d4ed8;background:#dbeafe;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">管理员</span>`;
+    }
+    // 顶栏分区控件统一用下拉框：
+    //   - 标准账号（2611/2612/2621/2622）：默认选中本分区并锁定，选择其他分区会提示无权限并恢复
+    //   - "其他"账号（管理员/非标准 UID）：可自由切换查看任意分区，并显示"其他"徽标
+    const myPrefix = uidToRegionPrefix(me.uid);
+    const cur = getHomeFilters().region;
+    // 标准账号：下拉框默认锁定在本分区；"其他"账号：默认用当前筛选值（可能为空=全部区域）
+    const lockedValue = myPrefix || '';
+    const selectedValue = myPrefix ? myPrefix : cur;
+    const onChangeAttr = myPrefix
+      ? `onchange="if(this.value !== '${lockedValue}'){alert('无权限选择：您只能查看所在分区的帖子。');this.value='${lockedValue}';}"`
+      : `onchange="setHomeFilter('region', this.value)"`;
+    const otherBadge = myPrefix
+      ? ''
+      : `<span class="nav-region nav-region-other" title="该账号不属于 4 个标准分区">其他</span>`;
+    const regionEl = `<select class="nav-region-select${myPrefix ? ' nav-region-locked' : ''}" onclick="event.stopPropagation()" ${onChangeAttr} title="${myPrefix ? '您所在分区，无权切换' : '切换查看分区'}">
+      ${myPrefix ? '' : `<option value=""${selectedValue === '' ? ' selected' : ''}>全部区域</option>`}
+      ${REGIONS.map(r => `<option value="${r.prefix}"${selectedValue === r.prefix ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}
+    </select>${otherBadge}`;
+    // 等级徽标：依据累计积分算等级，点击进积分页（expPoints 可能旧缓存为空，兜底 0）
+    const _li = api.getLevelInfo(Number(me.expPoints || 0), me.role);
+    const levelBadge = `<a href="#exp" class="nav-level" onclick="event.stopPropagation()" title="等级 Lv.${_li.level}｜累计积分 ${_li.exp}（点开看详情）">Lv.${_li.level}</a>`;
+    // 系统消息铃铛：未读时显示红点数字
+    const notifBadge = unreadNotif > 0 ? `<span class="unread-badge">${unreadNotif}</span>` : '';
+    const bellHtml = `<a href="#notifications" class="nav-bell" onclick="event.stopPropagation()" title="系统消息">🔔${notifBadge}</a>`;
+    nav.innerHTML = `
+      <span class="nav-right-group">
+        <span class="nav-user" title="我的主页" onclick="location.hash='me'">
+          ${levelBadge}
+          ${regionEl}
+          <span class="avatar-sm nav-avatar">${buildAvatarInner(me)}</span>
+          <span class="user-nickname">${roleBadge}${guildBadge(me)}${escapeHtml(me.nickname)}</span>
+        </span>
+        ${bellHtml}
+        <button class="secondary" onclick="doLogout()">退出</button>
+      </span>
+    `;
+  } else {
+    nav.innerHTML = `
+      <span class="nav-right-group">
+        <button class="secondary" onclick="location.hash='register'">注册</button>
+        <button class="secondary" onclick="location.hash='login'">登录</button>
+      </span>
+    `;
+  }
+  renderDrawer(loggedIn, me, unreadMsg, unreadNotif);
+}
+window.renderTopBar = renderTopBar;
+
+// ==================== 左侧抽屉 ====================
+function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
+  const drawerNav = document.getElementById('drawerNav');
+  if (!drawerNav) return;
+  const isOpsAdmin = loggedIn && me && (me.role === 'ops_admin');
+  const isAnyAdmin = loggedIn && me && (me.role === 'ops_admin' || me.role === 'admin');
+  const items = loggedIn
+    ? [
+        { label: '首页',     icon: '🏠', hash: 'home' },
+        { label: '广场',     icon: '📢', hash: 'forum' },
+        { label: '公会',     icon: '🏰', hash: 'guilds' },
+        { label: '日历',     icon: '📅', hash: 'calendar' },
+        { label: '我的',     icon: '👤', hash: 'me' },
+        { label: '积分',     icon: '🏆', hash: 'exp' },
+        { label: '系统消息', icon: '🔔', hash: 'notifications', badge: unreadNotif || 0 },
+        { label: '公告',     icon: '📋', hash: 'announcements' },
+        { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
+        { label: 'FAQ',      icon: '❓', hash: 'faq' },
+        { label: '关于本站', icon: 'ℹ️', hash: 'about' },
+        ...(isAnyAdmin ? [{ label: '管理员面板', icon: '📝', hash: 'admin-sub', highlight: true, subColor: '#1d4ed8' }] : []),
+        ...(isOpsAdmin ? [{ label: '运维管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
+      ]
+    : [
+        { label: '首页',     icon: '🏠', hash: 'home' },
+        { label: '公会',     icon: '🏰', hash: 'guilds' },
+        { label: '日历',     icon: '📅', hash: 'calendar' },
+        { label: '公告',     icon: '📋', hash: 'announcements' },
+        { label: 'FAQ',      icon: '❓', hash: 'faq' },
+        { label: '关于本站', icon: 'ℹ️', hash: 'about' },
+      ];
+
+  const cur = (location.hash || '').split('?')[0].slice(1) || 'home';
+  drawerNav.innerHTML = items.map(it => {
+    const active = cur === it.hash ? 'active' : '';
+    const badge = it.badge ? `<span class="unread-badge">${it.badge}</span>` : '';
+    const style = it.subColor ? `style="color:${it.subColor}"` : (it.highlight ? 'style="color:#b45309"' : '');
+    return `<a href="#${it.hash}" class="${active}" ${style} onclick="closeDrawer()">
+      <span>${it.icon}</span>
+      <span>${escapeHtml(it.label)}</span>
+      ${badge}
+    </a>`;
+  }).join('');
+}
+function openDrawer() {
+  const d = document.getElementById('sideDrawer');
+  const o = document.getElementById('drawerOverlay');
+  if (d) d.classList.add('open');
+  if (o) o.classList.add('open');
+}
+function closeDrawer() {
+  const d = document.getElementById('sideDrawer');
+  const o = document.getElementById('drawerOverlay');
+  if (d) d.classList.remove('open');
+  if (o) o.classList.remove('open');
+}
+window.openDrawer = openDrawer;
+window.closeDrawer = closeDrawer;
+
+// ==================== 视图：帖子卡片（复用在首页列表/我的帖/我的赞/我的收藏） ====================
+function postCard(p, opts = {}) {
+  const author = p.authorNickname || `用户${p.authorUid}`;
+  const time = formatTime(p.createdAt);
+  // 作者公开资料（头像+昵称）：点头像或昵称进作者主页，stopPropagation 防触发卡片跳详情
+  const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
+  const authorLevel = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const levelBadge = `<span class="level-badge${authorLevel.isAdmin ? ' admin' : ''}">Lv.${authorLevel.level}</span>`;
+  const guildBadgeHtml = guildBadge(p);
+  const authorHtml = `<span class="post-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(authorUser)}</span><span class="post-author-name">${escapeHtml(author)}</span>${guildBadgeHtml}${levelBadge}</span>`;
+  const tags = (Array.isArray(p.tags) && p.tags.length)
+    ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">
+         ${p.tags.map(t => `<span class="tag-chip" onclick="event.stopPropagation();setHomeFilter('tag',${escapeHtml(JSON.stringify(t))})" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+       </div>`
+    : '';
+  // 图片缩略图预览
+  const imagesHtml = (Array.isArray(p.imageIds) && p.imageIds.length)
+    ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+         ${p.imageIds.slice(0, 4).map(id => {
+           const url = api.images.getUrl(id);
+           return `<img src="${escapeHtml(url)}" alt="图片" style="width:80px;height:80px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb">`;
+         }).join('')}
+         ${p.imageIds.length > 4 ? `<span style="display:flex;align-items:center;justify-content:center;width:80px;height:80px;border-radius:6px;background:#f3f4f6;color:#6b7280;font-size:12px">+${p.imageIds.length - 4}</span>` : ''}
+       </div>`
+    : '';
+  const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
+  const postIdBadge = `<span style="font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 6px;border-radius:4px;margin-left:4px" title="帖子编号">#${p.id}</span>`;
+  const clickable = opts.allowClick ? 'clickable' : '';
+  // 置顶帖（带 foldId）的卡片 div 不绑 onclick 跳转，避免与"折叠"操作的内联 onclick 时序冲突；
+  // 改由标题 h3 可点击跳转详情。普通帖保持整卡可点。
+  const isPinnedCard = !!opts.foldId;
+  const onclickAttr = (opts.allowClick && !isPinnedCard) ? `onclick="location.hash='#detail/${p.id}'"` : '';
+  const titleClickAttr = isPinnedCard
+    ? `onclick="location.hash='#detail/${p.id}'" style="cursor:pointer;color:#1d4ed8"`
+    : '';
+  const pinBadge = p.isPinned
+    ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
+    : '';
+  const catBadge = categoryBadgeHtml(p.category, { clickable: opts.allowClick });
+  // 置顶帖右下角折叠文字：父 div 已不绑 onclick，用 data-act 事件委托处理
+  const foldBtn = opts.foldId
+    ? `<span data-act="fold" data-id="${opts.foldId}" style="font-size:12px;color:#6b7280;cursor:pointer">折叠</span>`
+    : '';
+  return `
+    <div class="card ${clickable}" ${onclickAttr} data-post-id="${p.id}">
+      <div class="meta">
+        ${pinBadge}${catBadge}${authorHtml}
+        <span>·</span>
+        <span>${escapeHtml(time)}</span>
+      </div>
+      <h3 ${titleClickAttr}>${escapeHtml(p.title)}</h3>
+      <p style="white-space:pre-wrap">${escapeHtml(normalizeNewlines((p.content || '').slice(0, 140)))}${(p.content || '').length > 140 ? '…' : ''}</p>
+      ${imagesHtml}
+      ${tags}
+      <div class="meta" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+        <span>${stats}${postIdBadge}</span>
+        ${foldBtn}
+      </div>
+    </div>
+  `;
+}
+
+// 置顶帖折叠行 HTML（单行标题形式，点击展开）；抽取出来供初始渲染与折回时复用
+function pinnedRowHtml(p) {
+  return `
+    <div class="card clickable" id="pinnedRow-${p.id}" data-act="expand" data-id="${p.id}" style="padding:8px 12px;margin-bottom:6px;display:flex;align-items:center;gap:8px" title="点击展开">
+      <span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;white-space:nowrap">置顶</span>
+      ${categoryBadgeHtml(p.category)}
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>
+      <span style="white-space:nowrap;color:#6b7280;font-size:12px">${escapeHtml(p.authorNickname || ('用户'+p.authorUid))}</span>
+      <span style="font-size:11px;color:#9ca3af;white-space:nowrap">▸ 点击展开</span>
+    </div>`;
+}
+
+// ==================== 广场页搜索/筛选 工具函数 ====================
+// 把搜索筛选参数统一塞到 location.hash 的查询串部分（紧跟在 #forum 之后，用 ? 开头）
+// 例：#forum?q=数学&tag=社团招新&from=2026-08-01&to=2026-08-31&sort=hot
+function getHomeFilters() {
+  const raw = (location.hash || '').slice(1);
+  const [pathPart, queryPart] = raw.split('?');
+  const qp = new URLSearchParams(queryPart || '');
+  return {
+    category: qp.get('cat') || '',
+    q: qp.get('q') || '',
+    tag: qp.get('tag') || '',
+    dateFrom: qp.get('from') || '',
+    dateTo: qp.get('to') || '',
+    sortBy: qp.get('sort') || 'latest',
+    region: qp.get('region') || '',   // 分区前缀 2611/2612/2621/2622（仅"其他"账号可切换）
+    __path: pathPart,
+  };
+}
+function buildHomeHash(f) {
+  const qp = new URLSearchParams();
+  if (f.category) qp.set('cat', f.category);
+  if (f.q) qp.set('q', f.q);
+  if (f.tag) qp.set('tag', f.tag);
+  if (f.dateFrom) qp.set('from', f.dateFrom);
+  if (f.dateTo) qp.set('to', f.dateTo);
+  if (f.sortBy && f.sortBy !== 'latest') qp.set('sort', f.sortBy);
+  if (f.region) qp.set('region', f.region);
+  const qs = qp.toString();
+  return '#forum' + (qs ? `?${qs}` : '');
+}
+// 多标签：tag 存为逗号分隔字符串（如 "高二,羽毛球"），这里统一解析成数组
+function tagList(s) {
+  return String(s == null ? '' : s).split(/[,，]/).map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+}
+window.setHomeFilter = function setHomeFilter(key, value) {
+  const f = getHomeFilters();
+  if (key === 'sort') f.sortBy = value || 'latest';
+  else if (key === 'category') f.category = value || '';
+  else if (key === 'tag') {
+    // value 为空串 = 清除全部标签；非空 = toggle（在/不在集合就移除/添加）
+    if (!value) {
+      f.tag = '';
+    } else {
+      const list = tagList(f.tag);
+      const v = String(value).trim().replace(/^#/, '');
+      const i = list.indexOf(v);
+      if (i >= 0) list.splice(i, 1);
+      else if (v) list.push(v);
+      f.tag = list.join(',');
+    }
+  }
+  else f[key] = value || '';
+  location.hash = buildHomeHash(f);
+  setTimeout(route, 0);
+};
+// 移除单个标签筛选（filterBadge 的 × 用）
+window._removeHomeTag = function _removeHomeTag(value) {
+  const f = getHomeFilters();
+  const v = String(value || '').trim().replace(/^#/, '');
+  f.tag = tagList(f.tag).filter(t => t !== v).join(',');
+  location.hash = buildHomeHash(f);
+  setTimeout(route, 0);
+};
+// 帖子 chip / 热门标签 chip 点击 = toggle 单个标签（多选）
+window.clearHomeFilters = function clearHomeFilters() {
+  location.hash = '#forum';
+  setTimeout(route, 0);
+};
+
+// 搜索框失焦自动恢复：若搜索框已清空且 URL 里还残留 q 筛选，
+// 则自动清掉关键字筛选并刷新回初始帖子展示状态（无需再点搜索按钮）
+window._sqBlurRestore = function _sqBlurRestore(input) {
+  const val = (input && input.value || '').trim();
+  if (val) return;                              // 搜索框有内容 → 不动，交给"搜索"按钮
+  const hash = location.hash || '';
+  if (!hash.includes('q=') && !hash.includes('q%3D')) return; // 本来就没 q 筛选 → 无需恢复
+  // 清掉 q 筛选（保留其他分区/标签/日期/排序筛选），刷新
+  setHomeFilter('q', '');
+};
+
+// ==================== 用户搜索功能 ====================
+// 合并搜索：q 可选传入；不传则读取搜索框 sqInput。
+// 渲染目标：左侧主区的 #userBlock（卡片样式包裹，顶部小标题+结果列表）
+// 返回 { success, count } 便于调用方了解结果情况。
+window.runUserSearch = async function runUserSearch(q) {
+  const input = document.getElementById('sqInput');
+  const userBlock = document.getElementById('userBlock');
+  if (!userBlock) return { success: false, count: 0 };
+  const kw = (q != null ? String(q) : (input && input.value || '')).trim();
+  if (!kw) { userBlock.innerHTML = ''; return { success: true, count: 0 }; }
+
+  userBlock.innerHTML = `
+    <div class="card">
+      <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+      <span class="hint">🔄 搜索中...</span>
+    </div>`;
+  try {
+    const r = await api.users.search(kw);
+    if (!r.success) {
+      userBlock.innerHTML = `
+        <div class="card">
+          <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+          <span class="hint">❌ ${escapeHtml(r.message)}</span>
+        </div>`;
+      return { success: false, count: 0 };
+    }
+    const list = r.data || [];
+    if (list.length === 0) {
+      userBlock.innerHTML = `
+        <div class="card">
+          <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+          <span class="hint">未找到匹配的用户</span>
+        </div>`;
+      return { success: true, count: 0 };
+    }
+    userBlock.innerHTML = `
+      <div class="card">
+        <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户（${list.length}）</h4>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${list.map(u => renderUserSearchItem(u)).join('')}
+        </div>
+      </div>`;
+    return { success: true, count: list.length };
+  } catch (e) {
+    userBlock.innerHTML = `
+      <div class="card">
+        <h4 style="margin:0 0 8px 0;font-size:15px">👤 匹配用户</h4>
+        <span class="hint">❌ 搜索失败：${escapeHtml(e.message)}</span>
+      </div>`;
+    return { success: false, count: 0 };
+  }
+};
+
+window.clearUserSearch = function clearUserSearch() {
+  const input = document.getElementById('sqInput');
+  const userBlock = document.getElementById('userBlock');
+  if (input) input.value = '';
+  if (userBlock) userBlock.innerHTML = '';
+};
+
+function renderUserSearchItem(u) {
+  const matchBadge = u.matchType === 'uid'
+    ? `<span style="font-size:11px;color:#059669;background:#d1fae5;padding:0 5px;border-radius:4px;margin-left:4px">UID 匹配</span>`
+    : `<span style="font-size:11px;color:#2563eb;background:#dbeafe;padding:0 5px;border-radius:4px;margin-left:4px">昵称匹配</span>`;
+  return `<div onclick="location.hash='#user/${escapeHtml(u.uid)}'" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;transition:background 0.15s" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+    <span class="avatar-sm" style="flex-shrink:0">${buildAvatarInner(u)}</span>
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+        <span style="font-weight:500;color:#1f2937">${escapeHtml(u.nickname)}</span>
+        ${guildBadge(u)}
+        ${matchBadge}
+        ${roleBadgeInline(u.role)}
+      </div>
+      <div style="font-size:12px;color:#6b7280">UID: ${escapeHtml(u.uid)} · 帖子 ${u.postCount || 0} · 注册 ${escapeHtml(formatTime(u.createdAt))}</div>
+    </div>
+    <span style="color:#6b7280;font-size:12px">→</span>
+  </div>`;
+}
+
+/**
+ * 用户主页「发私信」按钮：打开私信页面（如果已存在对话则直接进入）
+ * 如果还没有对话，创建一条欢迎消息后跳转
+ */
+window.openQuickMessage = async function openQuickMessage(toUid, toNickname) {
+  if (!api.isLoggedIn()) { alert('请先登录'); location.hash = 'login'; return; }
+  if (!toUid) return;
+  // 直接跳转到私信页面（私信系统已按对方 UID 聚合会话，首次进入会自动创建会话）
+  location.hash = `messages?peer=${encodeURIComponent(toUid)}&name=${encodeURIComponent(toNickname || '')}`;
+};
+
+// ==================== 视图：封面页（首页 #home，未登录也能看）====================
+function renderCover(app) {
+  const loggedIn = api.isLoggedIn();
+  app.innerHTML = `
+    <div class="cover-hero" style="text-align:center;padding:48px 20px 36px">
+      <h1 style="font-size:28px;margin-bottom:12px">广五校园论坛</h1>
+      <p style="font-size:15px;color:#6e6e73;margin-bottom:24px">属于广五人的交流空间</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        ${loggedIn
+          ? `<button onclick="location.hash='forum'" style="padding:10px 28px;font-size:15px">进入广场 →</button>
+             <button class="secondary" onclick="location.hash='exp'" style="padding:10px 28px;font-size:15px">📅 每日签到</button>`
+          : `<button onclick="location.hash='login'" style="padding:10px 28px;font-size:15px">登录</button>
+             <button class="secondary" onclick="location.hash='register'" style="padding:10px 28px;font-size:15px">注册</button>`
+        }
+      </div>
+    </div>
+    <!-- 动画占位区：后续放首页动画效果 -->
+    <div id="coverAnimation" style="min-height:200px;display:flex;align-items:center;justify-content:center;color:#c4c4c8;font-size:14px">
+      🎬 动画效果开发中…
+    </div>
+  `;
+}
+
+// ==================== 视图：关于本站（免责声明 / 法律风险规避）====================
+function renderAbout(app) {
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600">ℹ️ 关于本站</span></div>
+
+    <div class="card">
+      <h3 style="margin-top:0">一、站点性质</h3>
+      <p>本论坛（以下简称"本站"）由广五学生个人利用课余时间自发搭建与维护，属于<strong>非官方、非营利性</strong>的校园交流尝试。<strong>本站与广州市第五中学（以下简称"学校"）及其任何下属机构、社团、师生组织均无隶属、代理、合作或赞助关系</strong>，不代表学校立场，亦未获学校授权。站点名称中涉及"广五"字样仅为限定讨论圈层，不构成对学校名称权的主张。</p>
+      <p>本站所有内容均由注册用户自行发布，<strong>本站及管理员仅提供信息存储与传输服务，不参与内容的编辑、采纳或背书</strong>。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">二、用户责任与行为规范</h3>
+      <p>用户在注册及使用本站时，即视为<strong>已阅读、理解并同意</strong>本声明全部条款。用户须对自己的言论与发布行为承担<strong>全部法律责任</strong>，包括但不限于民事、行政及刑事责任。</p>
+      <p>用户<strong>不得</strong>在本站发布、传播下列内容：</p>
+      <ul>
+        <li>违反宪法或法律、行政法规的；</li>
+        <li>危害国家安全、泄露国家秘密、颠覆政权、破坏社会稳定的；</li>
+        <li>煽动民族仇恨、民族歧视、破坏民族团结的；</li>
+        <li>含有谣言、虚假信息、诈骗或教唆犯罪内容的；</li>
+        <li>侮辱、诽谤他人，侵害他人名誉权、肖像权、隐私权等人格权的；</li>
+        <li><strong>涉及他人真实姓名、学号、班级、电话、住址、身份证号等个人隐私信息的</strong>（无论是否本人同意，均不予允许）；</li>
+        <li>含有淫秽、色情、暴力、恐怖或教唆未成年人不良行为的；</li>
+        <li>侵犯他人知识产权、商业秘密或其他合法权益的；</li>
+        <li>其他法律法规禁止或本站规则不允许的内容。</li>
+      </ul>
+      <p>用户发布上述内容的，<strong>由用户自行承担全部法律后果</strong>，本站不承担任何连带责任；本站有权在不通知的情况下删除违规内容、限制或封禁账号，并<strong>配合有权机关的调查与取证</strong>。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">三、内容免责</h3>
+      <p>本站<strong>不对任何用户内容的真实性、准确性、完整性、合法性作出任何保证或承诺</strong>。用户不应据本站内容作出任何决定，因信赖本站内容而产生的任何损失，由用户自行承担。</p>
+      <p>本站转载、存储的用户内容，<strong>不意味着本站赞同其观点或证实其描述</strong>。文责由发布者自负。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">四、侵权投诉与处理</h3>
+      <p>若您认为本站任何内容侵犯您的合法权益（包括但不限于著作权、名誉权、隐私权等），请通过本站私信联系管理员，并提供：</p>
+      <ul>
+        <li>权利人的身份证明及联系方式；</li>
+        <li>主张被侵权的内容链接或帖子标题；</li>
+        <li>初步的权属证明及侵权说明。</li>
+      </ul>
+      <p>管理员将在合理时间内<strong>核实并删除涉嫌侵权的内容</strong>。本站在收到合格通知后，将依法依规采取必要措施，并<strong>不承担事先审查义务</strong>。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">五、服务变更与中断</h3>
+      <p>本站基于第三方云服务（如 Cloudflare、Vercel/Netlify 等）运行，<strong>不保证服务持续可用、稳定或无故障</strong>。因服务器、网络、第三方平台、不可抗力等原因导致的服务中断、数据丢失或异常，本站<strong>不承担赔偿或恢复责任</strong>。</p>
+      <p>本站有权<strong>随时修改、暂停或终止</strong>部分或全部服务，无需事先通知，且不承担任何责任。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">六、未成年人保护</h3>
+      <p>本站面向中学生群体，用户<strong>大多为未成年人</strong>。请用户在监护人指导下使用，<strong>不得泄露本人或他人隐私</strong>，遇到不良信息或不当接触请立即告知监护人并联系管理员处理。本站将优先处置涉及未成年人的违规内容。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">七、知识产权</h3>
+      <p>用户发布的内容，著作权归原作者所有。用户在本站发布内容，即视为<strong>授予本站免费的、非独占的、在全球范围内的存储、展示、传播及为维护站点必要而进行复制与改编的权利</strong>，但不改变著作权归属。</p>
+      <p>本站页面的版式、代码、图标等设计元素，归本站开发者所有，未经许可不得复制或用于其他站点。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">八、免责声明的修改</h3>
+      <p>本站有权<strong>随时修订本声明</strong>，修订后的声明自在本站公布之日起生效，用户继续使用本站即视为接受修订内容。请定期查阅本页。</p>
+    </div>
+
+    <div class="card" style="background:#fef3c7;border:1px solid #fde68a">
+      <p style="margin:0;font-size:13px;color:#92400e"><strong>⚠️ 特别提示：</strong>继续访问或使用本站任何功能，即视为您已充分阅读、理解并自愿接受本声明全部条款，并自愿承担相应风险与责任。如您不同意，请立即停止使用并关闭本页。</p>
+    </div>
+
+    <div class="card" style="background:linear-gradient(135deg,#f0f9ff 0%,#faf5ff 100%);border:1px solid #e0e7ff">
+      <h3 style="margin-top:0">🧑‍💻 关于开发者</h3>
+      <p>本站由 <strong>Andrew</strong>（广五学生）独立开发与维护，属于个人课余项目。从前端到后端、从数据库到部署，全部由 Andrew 一人完成。</p>
+      <p style="margin-top:10px">
+        <a href="https://andrewawa.netlify.app" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-size:13px">
+          🔗 访问开发者博客 →
+        </a>
+      </p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">🔗 友情链接</h3>
+      <ul>
+        <li><a href="https://andrewawa.netlify.app" target="_blank" rel="noopener">Andrew 的个人博客</a> — 开发者的技术分享与日常记录</li>
+      </ul>
+      <p style="color:#6b7280;font-size:12px">欢迎与本站交换友情链接，请通过私信联系管理员。</p>
+    </div>
+
+    <div style="text-align:center;padding:20px 10px;color:#9ca3af;font-size:12px">
+      © 2026 广五校园论坛 · Made with ❤️ by Andrew · Powered by Cloudflare
+    </div>
+  `;
+}
+
+// ==================== 视图：常见问题与解答 FAQ ====================
+window.toggleFaq = function toggleFaq(i) {
+  const ans = document.getElementById('faqAns' + i);
+  const arrow = document.getElementById('faqArrow' + i);
+  if (!ans || !arrow) return;
+  if (ans.style.display === 'none') {
+    ans.style.display = 'block';
+    arrow.style.transform = 'rotate(180deg)';
+  } else {
+    ans.style.display = 'none';
+    arrow.style.transform = 'rotate(0deg)';
+  }
+};
+
+function renderFaq(app) {
+  const faqs = [
+    { q: '这个论坛是学校官方的吗？', a: '不是。本站由广五学生 Andrew 利用课余时间独立开发与维护，属于非官方、非营利性的个人项目，与广州市第五中学无任何隶属或合作关系。' },
+    { q: '怎么注册账号？', a: '打开注册页面，选择你所在的校区和学段，设置昵称和密码即可。UID 格式为：年份（2位）+ 校区（1=本部/2=金碧）+ 学段（1=初中/2=高中）+ 班级（2位）+ 学号（2位）。例如 26110101 = 26年入学 · 本部 · 初中 · 01班 · 01号。' },
+    { q: '忘记密码了怎么办？', a: '目前本站暂不支持自助找回密码功能。请通过私信联系管理员，提供你的 UID 进行身份核实后，管理员可以帮你重置密码。' },
+    { q: '我发的帖子为什么没了？', a: '可能的原因：① 帖子触发了敏感内容审核，被管理员隐藏或删除；② 你自己删除了；③ 网络问题导致发布失败但误以为成功。如果是被误删，可以私信管理员申请恢复。' },
+    { q: '可以发广告或者推广自己的社团吗？', a: '社团招新、活动宣传这类和校园生活相关的内容是可以发的，建议发到「生活」或对应分区并加上合适的标签。但商业广告、外部产品推广、引流到其他平台是不允许的，管理员会直接删除。' },
+    { q: '怎么删除自己发过的帖子或评论？', a: '打开帖子详情页，如果你是帖子作者，会看到「删除」按钮。评论也支持作者自己删除。如果你找不到删除按钮，可能是网络问题，请刷新页面试试。' },
+    { q: '如何保护自己的隐私？', a: '请不要在帖子、评论或私信中公开自己或他人的真实姓名、身份证号、电话号码、家庭住址、具体班级学号等个人隐私信息。也不要把账号密码告诉任何人。遇到骚扰或隐私泄露，请立即联系管理员。' },
+    { q: '管理员的权力有多大？', a: '管理员可以隐藏/删除违规帖子和评论、封禁违规账号、管理置顶帖。管理员不会查看你的私信内容（除非涉及违法或你主动举报）。管理员滥用权力的行为可以私信向开发者举报。' },
+    { q: '论坛是怎么运行的？会突然关掉吗？', a: '本站托管在 Cloudflare 的免费服务上（Pages + Workers + D1），不保证永久在线。如果 Cloudflare 停服、开发者毕业或时间精力不足，论坛可能随时停掉。建议把重要内容备份到本地。' },
+    { q: '我想给论坛提建议或帮忙，怎么联系？', a: '可以在站内私信管理员，或者通过「关于本站」页面里的友情链接访问开发者博客联系 Andrew。欢迎任何形式的反馈、建议和技术贡献！' },
+  ];
+
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600">❓ 常见问题与解答</span></div>
+
+    <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,#fef9c3 0%,#fef3c7 100%);border:1px solid #fde68a">
+      <p style="margin:0;font-size:14px;color:#92400e">💡 这里整理了大家最常问的问题。如果你没有找到答案，可以私信管理员或在广场发帖询问。</p>
+    </div>
+
+    ${faqs.map((f, i) => `
+      <div class="card" style="margin-bottom:8px;cursor:pointer" onclick="toggleFaq(${i})">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600;color:#1f2937">
+          <span style="color:#2563eb">Q${i + 1}.</span>
+          <span>${escapeHtml(f.q)}</span>
+          <span id="faqArrow${i}" style="margin-left:auto;color:#9ca3af;transition:transform 0.2s">▼</span>
+        </div>
+        <div id="faqAns${i}" style="display:none;margin-top:10px;padding:10px 12px;background:#f9fafb;border-radius:8px;font-size:14px;color:#374151;line-height:1.7">
+          <strong style="color:#059669">A:</strong> ${escapeHtml(f.a)}
+        </div>
+      </div>
+    `).join('')}
+
+    <div class="card" style="margin-top:16px;text-align:center">
+      <p style="margin:0;color:#6b7280">还有其他问题？欢迎 <a href="#messages" style="color:#2563eb">私信管理员</a> 或查看 <a href="#about" style="color:#2563eb">关于本站</a>。</p>
+    </div>
+  `;
+}
+
+// ==================== 视图：日历 ====================
+let _calYear, _calMonth;
+async function renderCalendar(app) {
+  const now = new Date();
+  if (!_calYear) _calYear = now.getFullYear();
+  if (!_calMonth) _calMonth = now.getMonth() + 1;
+
+  const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+  const weekDays = ['周一','周二','周三','周四','周五','周六','周日'];
+
+  // 年份下拉：当前年前后各 5 年，便于跳转
+  const thisYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 11 }, (_, i) => thisYear - 5 + i);
+  const monthOptions = monthNames.map((name, i) => ({ value: i + 1, label: name }));
+
+  app.innerHTML = `
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+        <label style="font-size:14px;font-weight:600;color:#1f2937;display:flex;align-items:center;gap:4px">
+          📅
+          <select id="calYearSel" style="padding:4px 8px;border-radius:6px;border:1px solid #d2d2d7;font-size:14px">
+            ${yearOptions.map(y => `<option value="${y}" ${y === _calYear ? 'selected' : ''}>${y} 年</option>`).join('')}
+          </select>
+        </label>
+        <select id="calMonthSel" style="padding:4px 8px;border-radius:6px;border:1px solid #d2d2d7;font-size:14px">
+          ${monthOptions.map(m => `<option value="${m.value}" ${m.value === _calMonth ? 'selected' : ''}>${m.label}</option>`).join('')}
+        </select>
+        <button class="secondary" id="calToday" style="padding:4px 12px;font-size:13px">今天</button>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:4px">
+        ${weekDays.map(d => `<div style="flex:1;text-align:center;font-size:12px;font-weight:600;color:#6b7280;padding:4px 0;background:#f9fafb;border-radius:4px">${d}</div>`).join('')}
+      </div>
+      <div id="calGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">🔄 加载中...</div>
+    </div>
+  `;
+
+  const yearSel = document.getElementById('calYearSel');
+  const monthSel = document.getElementById('calMonthSel');
+  yearSel.onchange = () => {
+    _calYear = parseInt(yearSel.value, 10);
+    renderCalendar(app);
+  };
+  monthSel.onchange = () => {
+    _calMonth = parseInt(monthSel.value, 10);
+    renderCalendar(app);
+  };
+  document.getElementById('calToday').onclick = () => {
+    const n = new Date();
+    _calYear = n.getFullYear();
+    _calMonth = n.getMonth() + 1;
+    renderCalendar(app);
+  };
+
+  const grid = document.getElementById('calGrid');
+  try {
+    const res = await api.posts.calendar(_calYear, _calMonth);
+    if (!res.success) { grid.textContent = `❌ ${res.message}`; return; }
+    const byDay = res.data || {};
+
+    // 计算日历格数
+    const firstDay = new Date(_calYear, _calMonth - 1, 1);
+    const lastDay = new Date(_calYear, _calMonth, 0);
+    const startWeekday = (firstDay.getDay() + 6) % 7; // 周一=0
+    const daysInMonth = lastDay.getDate();
+    const today = new Date();
+    const isCurrentMonth = today.getFullYear() === _calYear && today.getMonth() + 1 === _calMonth;
+    const todayDate = today.getDate();
+
+    let cells = [];
+    // 前面空格
+    for (let i = 0; i < startWeekday; i++) {
+      cells.push('<div style="background:#f9fafb;border-radius:6px;min-height:90px"></div>');
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const posts = byDay[d] || [];
+      const isToday = isCurrentMonth && d === todayDate;
+      const dayStyle = isToday
+        ? 'background:#eff6ff;border:2px solid #3b82f6;border-radius:6px;min-height:90px;padding:4px;display:flex;flex-direction:column'
+        : posts.length
+          ? 'background:#fff;border:1px solid #e5e7eb;border-radius:6px;min-height:90px;padding:4px;display:flex;flex-direction:column'
+          : 'background:#f9fafb;border-radius:6px;min-height:90px;padding:4px;display:flex;flex-direction:column';
+      const dayHeader = `<div style="font-size:11px;font-weight:600;color:${isToday ? '#3b82f6' : '#9ca3af'};margin-bottom:2px;text-align:right">${d}</div>`;
+      const postsHtml = posts.length
+        ? `<div style="flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:2px">
+            ${posts.map(p => `<a href="#detail/${p.id}" style="font-size:11px;line-height:1.3;color:#374151;text-decoration:none;padding:2px 4px;background:#f3f4f6;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(p.title)}">${categoryBadgeHtml(p.category)}${escapeHtml(p.title)}</a>`).join('')}
+          </div>`
+        : '';
+      cells.push(`<div style="${dayStyle}">${dayHeader}${postsHtml}</div>`);
+    }
+
+    grid.innerHTML = cells.join('');
+  } catch (e) {
+    grid.textContent = `❌ 网络错误：${e.message}`;
+  }
+}
+
+// ==================== 反馈悬浮球 ====================
+// 悬浮球 DOM 在 load 事件后一次性插入到 body，避免每次 route 重建
+function ensureFeedbackWidget() {
+  if (document.getElementById('feedbackBall')) return;
+
+  const ball = document.createElement('div');
+  ball.id = 'feedbackBall';
+  ball.innerHTML = '💬';
+  ball.title = '反馈 Bug / 建议';
+  Object.assign(ball.style, {
+    position: 'fixed',
+    right: '16px',
+    bottom: '24px',
+    width: '52px',
+    height: '52px',
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%)',
+    color: '#fff',
+    fontSize: '22px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 4px 14px rgba(99,102,241,0.4)',
+    zIndex: '9998',
+    transition: 'transform 0.2s, box-shadow 0.2s',
+    userSelect: 'none',
+  });
+  ball.onmouseenter = () => { ball.style.transform = 'scale(1.1)'; ball.style.boxShadow = '0 6px 20px rgba(99,102,241,0.5)'; };
+  ball.onmouseleave = () => { ball.style.transform = 'scale(1)'; ball.style.boxShadow = '0 4px 14px rgba(99,102,241,0.4)'; };
+  ball.onclick = toggleFeedbackPanel;
+
+  document.body.appendChild(ball);
+}
+
+function toggleFeedbackPanel() {
+  let panel = document.getElementById('feedbackPanel');
+  if (panel) {
+    panel.remove();
+    return;
+  }
+  panel = document.createElement('div');
+  panel.id = 'feedbackPanel';
+  Object.assign(panel.style, {
+    position: 'fixed',
+    right: '16px',
+    bottom: '88px',
+    width: '360px',
+    maxHeight: '520px',
+    background: '#fff',
+    borderRadius: '16px',
+    boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+    zIndex: '9999',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    border: '1px solid #e5e7eb',
+  });
+
+  panel.innerHTML = `
+    <div id="feedbackHeader" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff">
+      <span style="font-weight:600;font-size:14px">💬 Bug 反馈 & 建议</span>
+      <span id="feedbackClose" style="cursor:pointer;font-size:18px;opacity:0.8;line-height:1">×</span>
+    </div>
+    <div id="feedbackList" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-height:100px">
+      <span class="hint" style="padding:20px;text-align:center">🔄 加载反馈列表...</span>
+    </div>
+    <div id="feedbackInputWrap" style="padding:10px 12px;border-top:1px solid #f3f4f6;background:#fafafa">
+      ${api.isLoggedIn() ? `
+        <div style="display:flex;gap:8px">
+          <textarea id="feedbackInput" maxlength="1000" placeholder="说说你遇到的 bug 或建议..." style="flex:1;resize:none;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:13px;outline:none;font-family:inherit;height:54px" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitFeedback()}"></textarea>
+          <button onclick="submitFeedback()" style="padding:0 14px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500">发送</button>
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px;text-align:right"><span id="feedbackCount">0</span>/1000</div>
+      ` : `
+        <div style="text-align:center;padding:8px 0">
+          <span style="font-size:12px;color:#6b7280">请先 <a href="#login" style="color:#6366f1;text-decoration:none" onclick="document.getElementById('feedbackPanel')?.remove()">登录</a> 后提交反馈</span>
+        </div>
+      `}
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  // 关闭按钮
+  document.getElementById('feedbackClose').onclick = () => panel.remove();
+
+  // 字数计数
+  const ta = document.getElementById('feedbackInput');
+  if (ta) {
+    ta.oninput = () => {
+      const c = document.getElementById('feedbackCount');
+      if (c) c.textContent = (ta.value || '').length;
+    };
+  }
+
+  // 加载反馈列表
+  loadFeedbackList();
+}
+
+async function loadFeedbackList() {
+  const listEl = document.getElementById('feedbackList');
+  if (!listEl) return;
+  try {
+    const r = await api.feedbacks.list(1, 50);
+    if (!r.success) { listEl.innerHTML = `<span class="hint">❌ ${escapeHtml(r.message)}</span>`; return; }
+    const list = r.data || [];
+    if (list.length === 0) { listEl.innerHTML = `<span class="hint" style="padding:20px;text-align:center">还没有反馈，快来发第一条吧～</span>`; return; }
+    listEl.innerHTML = list.map(renderFeedbackItem).join('');
+  } catch (e) {
+    listEl.innerHTML = `<span class="hint">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function renderFeedbackItem(f) {
+  const author = f.author || {};
+  const avatarHtml = author.avatarUrl
+    ? `<img src="${escapeHtml(author.avatarUrl)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover">`
+    : `<div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0">${escapeHtml((author.nickname || 'U').slice(0, 1))}</div>`;
+  return `<div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid #f3f4f6">
+    ${avatarHtml}
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:600;color:#374151">${escapeHtml(author.nickname || '匿名用户')}</span>
+        ${guildBadge(f.author || {})}
+        ${author.role === 'ops_admin' ? `<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px">运维管理员</span>` : ''}
+        ${author.role === 'admin' ? `<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;padding:1px 5px;border-radius:3px">管理员</span>` : ''}
+        <span style="font-size:11px;color:#9ca3af">${escapeHtml(formatTime(f.createdAt))}</span>
+      </div>
+      <div style="font-size:13px;color:#1f2937;line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(normalizeNewlines(f.content))}</div>
+    </div>
+  </div>`;
+}
+
+window.submitFeedback = async function submitFeedback() {
+  const ta = document.getElementById('feedbackInput');
+  const listEl = document.getElementById('feedbackList');
+  if (!ta || !listEl) return;
+  const content = (ta.value || '').trim();
+  if (!content) return;
+
+  const sendBtn = ta.parentElement?.querySelector('button');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '发送中...'; }
+
+  const r = await api.feedbacks.submit(content);
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = '发送'; }
+
+  if (!r.success) {
+    alert('发送失败：' + r.message);
+    return;
+  }
+  ta.value = '';
+  const c = document.getElementById('feedbackCount');
+  if (c) c.textContent = '0';
+  // 重新加载列表
+  loadFeedbackList();
+};
+
+// ==================== 视图：广场（帖子列表 + 分区Tab + 搜索条 + 热门标签，需登录）====================
+async function renderForum(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  const filters = getHomeFilters();
+  const loggedIn = api.isLoggedIn();
+  const me = loggedIn ? api.getCurrentUser() : null;
+  const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
+  // 分区：标准账号（2611/2612/2621/2622）锁定看本分区帖子；"其他"账号用顶栏下拉框切换的分区（filters.region）
+  const myRegionPrefix = me ? uidToRegionPrefix(me.uid) : null;
+  const region = myRegionPrefix || filters.region || '';
+
+  // 顶部信息条：帖子计数留在左侧主区（发新帖按钮移到右侧搜索面板顶部，与 aside 同宽且一起 sticky 浮动）
+  const topBanner = `<div class="toolbar">
+         <span id="postCount">读取中...</span>
+       </div>`;
+
+  // 分区 Tab（显示在搜索条顶部 / 左上）：按 CATEGORIES 顺序，meta 仅管理员会"看到它是管理员专属"的角标
+  const tabItems = [{ key: '', label: '全部' }, ...CATEGORIES.filter(c => isAdmin || !c.adminOnly).map(c => ({ key: c.key, label: c.label, cssColor: c.cssColor, adminOnly: !!c.adminOnly }))];
+  const tabBarHtml = `<div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+    ${tabItems.map(tab => {
+      const active = (tab.key === '') ? !filters.category : (tab.key === filters.category);
+      const color = tab.cssColor || '#2563eb';
+      const style = active
+        ? `background:${color};color:#fff;border-color:${color}`
+        : `background:#fff;color:${tab.cssColor || '#333'};border-color:#d2d2d7`;
+      const adminBadge = tab.adminOnly ? '<small style="margin-left:4px;opacity:.9">🔒管</small>' : '';
+      return `<button onclick="setHomeFilter('category',${escapeHtml(JSON.stringify(tab.key))})"
+          style="padding:4px 12px;border-radius:999px;border:1px solid;font-size:13px;cursor:pointer;transition:.15s;${style}">
+          ${tab.label}${adminBadge}
+        </button>`;
+    }).join('')}
+  </div>`;
+
+  app.innerHTML = `
+    ${topBanner}
+    <div class="forum-layout">
+      <!-- 左侧主区：搜索结果 = 用户块 + 帖子块 -->
+      <div class="forum-main">
+        <!-- 用户搜索结果块（有搜索关键字才显示内容） -->
+        <div id="userBlock" style="margin-bottom:12px"></div>
+
+        <!-- 帖子块 -->
+        <div class="card">
+          <h3 id="listTitle" style="margin-top:0;margin-bottom:10px">最新帖子</h3>
+          <div id="postList" class="empty">🔄 正在读取帖子...</div>
+        </div>
+      </div>
+
+      <!-- 右侧列：发新帖（独立框）+ 广场展示设置 + 搜索面板（独立框），整体 sticky 浮动 -->
+      <div class="forum-side-col">
+        <button class="forum-newpost-btn" onclick="location.hash='post'">+ 发新帖</button>
+
+        <!-- 广场展示设置 -->
+        <div class="card forum-view-switch">
+          <div class="forum-view-title">🎨 广场展示设置</div>
+          <div class="forum-view-btns">
+            <button id="viewModeCards" class="forum-view-btn" data-mode="cards" onclick="setForumView('cards')">
+              <span class="forum-view-icon">🟦</span>
+              <span>卡片</span>
+            </button>
+            <button id="viewModeList" class="forum-view-btn" data-mode="list" onclick="setForumView('list')">
+              <span class="forum-view-icon">▤</span>
+              <span>列表</span>
+            </button>
+          </div>
+        </div>
+
+      <!-- 右侧搜索小板块（带圆角，帖子+用户共用一个关键字；分区Tab也放这里；不再显示用户匹配结果） -->
+      <aside class="forum-aside card search-panel">
+        <h3 style="margin-top:0;margin-bottom:12px;font-size:15px">🔍 搜索</h3>
+        <div class="search-row">
+          <input id="sqInput" placeholder="关键字（同时搜帖子标题/正文 与 用户 UID/昵称）" value="${escapeHtml(filters.q)}" onkeydown="if(event.key==='Enter')homeRunSearch()" onblur="window._sqBlurRestore(this)">
+        </div>
+        <div class="search-row">
+          <input id="stagInput" placeholder="按标签筛选（多个用逗号或 # 分隔）" value="${escapeHtml(filters.tag)}" onkeydown="if(event.key==='Enter')homeRunSearch()">
+        </div>
+        <div class="search-row">
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+            从 <input type="date" id="sFrom" value="${escapeHtml(filters.dateFrom)}">
+          </label>
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+            到 <input type="date" id="sTo" value="${escapeHtml(filters.dateTo)}">
+          </label>
+        </div>
+        <div class="search-row">
+          <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px">
+            排序
+            <select id="sSort" style="padding:4px 6px;border-radius:6px;border:1px solid #d2d2d7">
+              <option value="latest"   ${filters.sortBy==='latest'  ?'selected':''}>最新</option>
+              <option value="likes"    ${filters.sortBy==='likes'   ?'selected':''}>点赞最多排</option>
+              <option value="comments" ${filters.sortBy==='comments'?'selected':''}>评论最多排</option>
+              <option value="views"    ${filters.sortBy==='views'   ?'selected':''}>浏览最多排</option>
+            </select>
+          </label>
+        </div>
+        <div class="search-row" style="margin-top:6px">
+          <button onclick="homeRunSearch()">🔎 搜索</button>
+          <button class="secondary" onclick="clearHomeFilters()">🗑 清除条件</button>
+        </div>
+        <div id="filterBadges" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:8px"></div>
+
+        <h4 style="margin:10px 0 6px;font-size:13px;color:#374151">📂 分区</h4>
+        ${tabBarHtml}
+        <div id="popularTags">🔄 正在读取热门标签…</div>
+      </aside>
+      </div>
+    </div>
+  `;
+
+  // --- 1) 读取热门标签 chip ---
+  (async () => {
+    const box = document.getElementById('popularTags');
+    const resp = await api.posts.popularTags();
+    if (!resp.success) { box.outerHTML = ''; return; }
+    const tags = (resp.data && resp.data.tags) || [];
+    if (tags.length === 0) { box.outerHTML = ''; return; }
+    const activeTags = new Set(tagList(filters.tag));
+    box.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:4px">🔥 热门标签（点击多选筛选，可叠加）：</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${tags.map(t =>
+        `<span class="tag-chip ${activeTags.has(t.tag)?'active-tag':''}" onclick="setHomeFilter('tag',${escapeHtml(JSON.stringify(t.tag))})" title="该标签出现 ${t.count} 次，点击切换筛选">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`
+      ).join('')}</div>`;
+  })().catch(() => { /* 热门标签读取失败不用影响主流程 */ });
+
+  // --- 2) 读帖子列表（带筛选）；同时并行按相同关键字搜索用户（结果放左侧 userBlock） ---
+  const listEl = document.getElementById('postList');
+  const listTitleEl = document.getElementById('listTitle');
+
+  // 合并搜索：若有关键字，立刻启动用户搜索（并行，不阻塞帖子读取）
+  const userSearchPromise = filters.q ? runUserSearch(filters.q) : Promise.resolve({ success: true, count: 0 });
+
+  try {
+    const postFilters = {
+      category: filters.category || undefined,
+      q: filters.q || undefined,
+      tag: filters.tag || undefined,
+      dateFrom: filters.dateFrom || undefined,
+      dateTo: filters.dateTo || undefined,
+      sortBy: filters.sortBy,
+      region: region || undefined,
+    };
+    const res = await api.posts.list(1, 50, postFilters);
+    if (!res.success) {
+      listEl.outerHTML = `<div class="card">❌ 加载失败：${escapeHtml(res.message)}</div>`;
+      return;
+    }
+    const data = res.data || [];
+    const total = (res.pagination || {}).total || 0;
+    const countEl = document.getElementById('postCount');
+    // 当前分区标签：标准账号显示本分区，其他账号显示下拉框选择的分区（未选则"全部区域"）
+    const regionLabel = region
+      ? (REGIONS.find(r => r.prefix === region) || {}).label || `分区 ${region}`
+      : '全部区域';
+    if (countEl) countEl.textContent = `共 ${total} 条帖子 · 当前：${regionLabel}`;
+
+    const applied = (res.appliedFilters || {});
+    const hasFilter = applied.category || applied.q || applied.tag || applied.dateFrom || applied.dateTo;
+    const catLabelForTitle = applied.category ? (CATEGORY_LABEL[applied.category] || applied.category) : null;
+    const prefix = catLabelForTitle ? `「${catLabelForTitle}」` : '';
+    const sortTitles = { latest: '最新帖子', likes: '🔥 点赞最多排', comments: '💬 评论最多排', views: '👁 浏览最多排' };
+    if (listTitleEl) {
+      listTitleEl.textContent = hasFilter
+        ? `${prefix}${prefix ? ' ' : ''}📝 匹配帖子（${total} 条）`
+        : (sortTitles[applied.sortBy] || '最新帖子');
+    }
+
+    // 条件徽章（category / q / tag / 日期区间，点 × 清掉单个）
+    const badgeBox = document.getElementById('filterBadges');
+    if (badgeBox) {
+      const badges = [];
+      if (applied.category) badges.push(`<span class="filter-badge">分区：<b>${escapeHtml(CATEGORY_LABEL[applied.category] || applied.category)}</b><button class="chip-close" onclick="setHomeFilter('category','')">×</button></span>`);
+      if (applied.q) badges.push(`<span class="filter-badge">关键字：<b>${escapeHtml(applied.q)}</b><button class="chip-close" onclick="setHomeFilter('q','')">×</button></span>`);
+      if (applied.tag) {
+        for (const t of tagList(applied.tag)) {
+          badges.push(`<span class="filter-badge">标签：<b>#${escapeHtml(t)}</b><button class="chip-close" onclick="window._removeHomeTag(${escapeHtml(JSON.stringify(t))})">×</button></span>`);
+        }
+      }
+      if (applied.dateFrom) badges.push(`<span class="filter-badge">从 <b>${escapeHtml(applied.dateFrom)}</b><button class="chip-close" onclick="setHomeFilter('dateFrom','')">×</button></span>`);
+      if (applied.dateTo) badges.push(`<span class="filter-badge">到 <b>${escapeHtml(applied.dateTo)}</b><button class="chip-close" onclick="setHomeFilter('dateTo','')">×</button></span>`);
+      badgeBox.innerHTML = badges.join('');
+    }
+
+    if (data.length === 0) {
+      listEl.outerHTML = `<div class="empty">${hasFilter ? '😶 没有匹配的帖子，试试 🔎 清除条件 重新搜索～' : '还没有帖子，快来发第一条吧'}</div>`;
+      return;
+    }
+    // 分置顶帖和普通帖：搜索筛选态不再单独置顶折叠区，按排序直接混排
+    const pinnedPosts = hasFilter ? [] : data.filter(p => p.isPinned);
+    const normalPosts = hasFilter ? data : data.filter(p => !p.isPinned);
+
+    // 缓存供视图切换使用
+    _lastForumPostsCache = data;
+
+    const viewMode = getForumViewMode();
+    let html = '';
+
+    if (viewMode === 'cards') {
+      // 九宫格卡片模式（默认）：置顶直接混排在最前，不单独起行
+      listEl.className = 'cards-grid';
+      const all = [...pinnedPosts, ...normalPosts]; // 置顶 → 普通，按时间顺序
+      html = all.map(p => postCardCompact(p)).join('');
+    } else {
+      // 列表视图（外层已有 card 包裹，这里不要加 card class）
+      listEl.className = '';
+      if (pinnedPosts.length > 0) {
+        html += `<div id="pinnedSection" style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
+            <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+            <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+            <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
+          </div>
+          <div id="pinnedExpanded" style="display:none">
+            ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
+          </div>
+          <div id="pinnedCollapsed">
+            ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
+          </div>
+        </div>`;
+      }
+      // 供折叠行展开/折回使用：把置顶帖完整数据存到全局
+      window._pinnedData = pinnedPosts.slice();
+      html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
+      bindPinnedEvents();
+    }
+    listEl.innerHTML = html;
+
+    // 初始化视图切换按钮的激活态
+    const cardsBtn = document.getElementById('viewModeCards');
+    const listBtn = document.getElementById('viewModeList');
+    if (cardsBtn) cardsBtn.classList.toggle('active', viewMode === 'cards');
+    if (listBtn)  listBtn.classList.toggle('active', viewMode === 'list');
+  } catch (e) {
+    listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
+  }
+
+  // 确保用户搜索 Promise 不抛未处理异常（用户搜索渲染自己处理异常）
+  userSearchPromise.catch(() => {});
+}
+
+// ==================== 广场展示视图模式（localStorage 持久化）====================
+const VIEW_MODE_KEY = 'forumViewMode';
+function getForumViewMode() {
+  const v = (typeof localStorage !== 'undefined' ? localStorage.getItem(VIEW_MODE_KEY) : null);
+  return v === 'list' ? 'list' : 'cards'; // 默认卡片瀑布流
+}
+function setForumView(mode) {
+  if (mode !== 'cards' && mode !== 'list') return;
+  console.log('[setForumView] called mode=', mode, '_lastForumPostsCache=', _lastForumPostsCache?.length);
+
+  if (typeof localStorage !== 'undefined') localStorage.setItem(VIEW_MODE_KEY, mode);
+
+  // 更新按钮激活态（无论成功与否）
+  const cardsBtn = document.getElementById('viewModeCards');
+  const listBtn = document.getElementById('viewModeList');
+  if (cardsBtn) cardsBtn.classList.toggle('active', mode === 'cards');
+  if (listBtn)  listBtn.classList.toggle('active', mode === 'list');
+
+  const view = document.getElementById('postList');
+  if (!view) return;
+
+  // 用缓存的数据，纯同步 DOM 替换
+  const posts = _lastForumPostsCache;
+  if (!Array.isArray(posts) || posts.length === 0) {
+    // 没缓存？那就重新渲染整个广场页面
+    const app = document.getElementById('app');
+    if (app) renderForum(app);
+    return;
+  }
+
+  // 先把当前 postList 里的所有卡片 data-post-id 收集一遍兜底
+  const pinnedPosts = posts.filter(p => p.isPinned);
+  const normalPosts = posts.filter(p => !p.isPinned);
+
+  let html = '';
+  if (mode === 'cards') {
+    view.className = 'cards-grid';
+    const all = [...pinnedPosts, ...normalPosts];
+    html = all.map(p => postCardCompact(p)).join('');
+  } else {
+    view.className = '';
+    if (pinnedPosts.length > 0) {
+      html += `<div id="pinnedSection" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;user-select:none" data-act="toggle">
+          <span style="color:#f59e0b;font-size:14px;font-weight:600">📌 置顶帖（${pinnedPosts.length}）</span>
+          <span id="pinnedToggleHint" style="font-size:12px;color:#6b7280">点击展开</span>
+          <span data-act="foldAll" style="font-size:12px;color:#6b7280;cursor:pointer">全部折叠</span>
+        </div>
+        <div id="pinnedExpanded" style="display:none">
+          ${pinnedPosts.map(p => postCard(p, { allowClick: true, foldId: p.id })).join('')}
+        </div>
+        <div id="pinnedCollapsed">
+          ${pinnedPosts.map(p => pinnedRowHtml(p)).join('')}
+        </div>
+      </div>`;
+    }
+    html += normalPosts.map(p => postCard(p, { allowClick: true })).join('');
+    window._pinnedData = pinnedPosts.slice();
+    bindPinnedEvents();
+  }
+  view.innerHTML = html;
+}
+// 暴露到 window，让内联 onclick 能找到（ES Module 顶层 function 不自动挂 window）
+window.getForumViewMode = getForumViewMode;
+window.setForumView = setForumView;
+// 缓存最近一次帖子列表，供视图切换使用
+let _lastForumPostsCache = [];
+
+// 卡片瀑布流的紧凑小卡（小红书风格，圆角 + 封面 + 标题 + 作者 + stats）
+function postCardCompact(p) {
+  const title = escapeHtml(p.title || '(无标题)');
+  const contentShort = (p.content || '').slice(0, 80);
+  const hasImage = Array.isArray(p.imageIds) && p.imageIds.length > 0;
+  const coverHtml = hasImage
+    ? `<div class="wfall-cover"><img src="${escapeHtml(api.images.getUrl(p.imageIds[0]))}" alt=""></div>`
+    : `<div class="wfall-cover wfall-cover-text">
+         <span class="wfall-emoji">📝</span>
+         <span class="wfall-text-short">${escapeHtml(contentShort || title)}</span>
+       </div>`;
+  const tags = (Array.isArray(p.tags) && p.tags.length)
+    ? `<div class="wfall-tags">${p.tags.slice(0, 2).map(t => `<span>#${escapeHtml(t)}</span>`).join('')}</div>`
+    : '';
+  const pinnedBadge = p.isPinned ? `<span class="wfall-pinned">📌 置顶</span>` : '';
+  const catBadge = categoryBadgeHtml(p.category, { compact: true });
+  // 作者头像+昵称+Lv+公会
+  const authorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt };
+  const lvlInfo = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const authorGuild = guildBadge(p);
+  const authorMeta = `<span class="wfall-author" title="查看作者主页" onclick="event.stopPropagation();location.hash='#user/${escapeHtml(p.authorUid)}'">
+    <span class="avatar-xs">${buildAvatarInner(authorUser)}</span>
+    <span>${escapeHtml(p.authorNickname || ('用户' + p.authorUid))}</span>
+    ${authorGuild}
+    <span class="level-badge${lvlInfo.isAdmin ? ' admin' : ''}">Lv.${lvlInfo.level}</span>
+  </span>`;
+  return `
+    <div class="wfall-card" data-post-id="${p.id}" onclick="location.hash='#detail/${p.id}'" title="查看详情">
+      ${pinnedBadge}
+      ${coverHtml}
+      <div class="wfall-body">
+        <h4>${title}</h4>
+        <div class="wfall-meta">
+          ${catBadge}
+          ${authorMeta}
+        </div>
+        ${tags}
+        <div class="wfall-stats">
+          <span>👁 ${p.viewCount || 0}</span>
+          <span>👍 ${p.likeCount || 0}</span>
+          <span>💬 ${p.commentCount || 0}</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 置顶帖交互事件委托：在 #pinnedSection 上统一监听 click，按 data-act 派发。
+// 这样 outerHTML 替换出的新元素（折叠行/完整卡片）也能自动响应，避免内联 onclick 在事件处理中替换 DOM 的时序问题（导致要点两次）。
+function bindPinnedEvents() {
+  const ps = document.getElementById('pinnedSection');
+  if (!ps || ps._bound) return;
+  ps._bound = true;
+  ps.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-act]');
+    if (!el || el.closest('#pinnedSection') !== ps) return;
+    const act = el.dataset.act;
+    const id = el.dataset.id != null ? Number(el.dataset.id) : null;
+    if (act === 'toggle')      window._togglePinned();
+    else if (act === 'expand') window._expandPinned(id);
+    else if (act === 'fold')   window._foldPinned(id);
+    else if (act === 'foldAll')window._foldAllPinned();
+  });
+}
+window._togglePinned = function _togglePinned() {
+  const expanded = document.getElementById('pinnedExpanded');
+  const collapsed = document.getElementById('pinnedCollapsed');
+  const hint = document.getElementById('pinnedToggleHint');
+  if (!expanded || !collapsed) return;
+  if (expanded.style.display === 'none') {
+    expanded.style.display = '';
+    collapsed.style.display = 'none';
+    if (hint) hint.textContent = '点击折叠';
+  } else {
+    expanded.style.display = 'none';
+    collapsed.style.display = '';
+    if (hint) hint.textContent = '点击展开';
+  }
+};
+// 折叠态单条置顶帖：点击展开为完整卡片（标题可点跳详情，右下角"折叠"可折回）
+// 事件委托下同步替换安全：新元素不在当前 click 事件冒泡路径上，不会被同一次点击误触发
+window._expandPinned = function _expandPinned(id) {
+  const data = (window._pinnedData || []).find(p => p.id === id);
+  if (!data) return;
+  const row = document.getElementById(`pinnedRow-${id}`);
+  if (row) row.outerHTML = postCard(data, { allowClick: true, foldId: id });
+};
+// 展开态单条置顶帖右下角"折叠"：把完整卡片折回单行标题形式
+window._foldPinned = function _foldPinned(id) {
+  const data = (window._pinnedData || []).find(p => p.id === id);
+  if (!data) return;
+  const card = document.querySelector(`#pinnedSection [data-post-id="${id}"]`);
+  if (card) card.outerHTML = pinnedRowHtml(data);
+};
+// 标题行右侧"全部折叠"：隐藏整体展开区，显示折叠区并重置其中所有行（恢复被单条展开的）
+window._foldAllPinned = function _foldAllPinned() {
+  const expanded = document.getElementById('pinnedExpanded');
+  const collapsed = document.getElementById('pinnedCollapsed');
+  const hint = document.getElementById('pinnedToggleHint');
+  if (expanded) expanded.style.display = 'none';
+  if (collapsed) {
+    collapsed.style.display = '';
+    if (window._pinnedData) collapsed.innerHTML = window._pinnedData.map(pinnedRowHtml).join('');
+  }
+  if (hint) hint.textContent = '点击展开';
+};
+window.homeRunSearch = function homeRunSearch() {
+  const sq = document.getElementById('sqInput');
+  const stag = document.getElementById('stagInput');
+  const sFrom = document.getElementById('sFrom');
+  const sTo = document.getElementById('sTo');
+  const sSort = document.getElementById('sSort');
+  const f = getHomeFilters();
+  f.q = (sq && sq.value || '').trim();
+  // 多标签：把输入框文本按逗号/# 解析成集合再拼回（规范化，去重，去 # 前缀）
+  f.tag = [...new Set(tagList(stag && stag.value || ''))].join(',');
+  f.dateFrom = (sFrom && sFrom.value || '');
+  f.dateTo = (sTo && sTo.value || '');
+  f.sortBy = (sSort && sSort.value) || 'latest';
+  location.hash = buildHomeHash(f);
+  setTimeout(route, 0);
+};
+
+// ==================== 视图：登录 / 注册 / 发帖 ====================
+function renderLogin(app) {
+  app.innerHTML = `
+    <div class="card">
+      <h3>登录</h3>
+      <input id="uidInput" placeholder="用户UID（8位数字）" maxlength="8" inputmode="numeric">
+      <input id="pwdInput" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
+      <button id="loginBtn" onclick="doLogin()">登录</button>
+      <p class="hint">
+        还没有账号？<a href="#register">去注册 →</a><br>
+        密码采用 PBKDF2-HMAC-SHA-256 哈希存储，服务器无法看到明文。
+      </p>
+    </div>
+  `;
+  document.getElementById('pwdInput').addEventListener('keydown', e => e.key === 'Enter' && doLogin());
+}
+
+function renderRegister(app) {
+  app.innerHTML = `
+    <div class="card" style="background:#eff6ff;border:1px solid #bfdbfe;margin-bottom:14px">
+      <p style="margin:0;font-size:13px;color:#1e40af;line-height:1.6">
+        📢 <strong>注册前必读：</strong>请先阅读
+        <a href="#about" target="_blank" onclick="event.stopPropagation()" style="color:#2563eb">《关于本站》</a>
+        中的<span style="color:#dc2626">隐私条款</span>、用户责任与行为规范、未成年人保护等全部声明。
+      </p>
+      <p style="margin:6px 0 0;font-size:12px;color:#6b7280">
+        📌 UID 格式：<strong>26</strong>（年份）+ <strong>校区</strong>（1=广五本部 / 2=金碧校区）+ <strong>学段</strong>（1=初中 / 2=高中）+ <strong>班级</strong>（2位）+ <strong>学号</strong>（2位）= 共 8 位<br>
+        例如：26110101 = 26届 · 广五本部 · 初中 · 01班 · 01号
+      </p>
+    </div>
+    <div class="card">
+      <h3>注册新账号</h3>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏫 校区</label>
+        <select id="campusSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          <option value="1">广五本部</option>
+          <option value="2">金碧校区</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">📚 学段</label>
+        <select id="levelSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          <option value="1">初中</option>
+          <option value="2">高中</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-bottom:12px">
+        <div style="flex:1">
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏫 班级（2位）</label>
+          <input id="classInput" placeholder="如 01" maxlength="2" inputmode="numeric" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px">
+        </div>
+        <div style="flex:1">
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🔢 学号（2位）</label>
+          <input id="stuNoInput" placeholder="如 01" maxlength="2" inputmode="numeric" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px">
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;padding:8px 12px;background:#f3f4f6;border-radius:8px;font-family:monospace;font-size:16px;font-weight:600;color:#1d1d1f;text-align:center" id="uidPreview">
+        UID：26110101
+      </div>
+
+      <input id="pwdInput" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password">
+      <input id="pwd2Input" type="password" placeholder="再次输入密码" autocomplete="new-password">
+      <input id="nickInput" placeholder="昵称（1-20字，可选）" maxlength="20">
+      <textarea id="bioInput" placeholder="个人简介（可选，200字内）" maxlength="200" style="min-height:60px"></textarea>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin:0 0 8px;font-size:13px;line-height:1.5;cursor:pointer">
+        <input id="agreeInput" type="checkbox" style="margin-top:3px;width:auto;flex:0 0 auto">
+        <span>我已阅读并同意 <a href="#about" target="_blank" onclick="event.stopPropagation()">《关于本站》</a> 中的全部声明（含隐私条款、站点性质、用户责任与行为规范、内容免责、侵权处理、未成年人保护、知识产权等）。</span>
+      </label>
+      <button id="regBtn" onclick="doRegister()">注册</button>
+      <p class="hint">
+        已经有账号？<a href="#login">直接登录 →</a><br>
+        注册后 UID 不可修改，请确认填写正确。
+      </p>
+    </div>
+  `;
+
+  // UID 实时预览
+  const campusSel = document.getElementById('campusSelect');
+  const levelSel = document.getElementById('levelSelect');
+  const classInp = document.getElementById('classInput');
+  const stuInp = document.getElementById('stuNoInput');
+  const preview = document.getElementById('uidPreview');
+  function updatePreview() {
+    const c = campusSel.value;
+    const l = levelSel.value;
+    const cl = (classInp.value || '').padStart(2, '0');
+    const sn = (stuInp.value || '').padStart(2, '0');
+    preview.textContent = `UID：26${c}${l}${cl}${sn}`;
+  }
+  campusSel.addEventListener('change', updatePreview);
+  levelSel.addEventListener('change', updatePreview);
+  classInp.addEventListener('input', updatePreview);
+  stuInp.addEventListener('input', updatePreview);
+
+  document.getElementById('pwd2Input').addEventListener('keydown', e => e.key === 'Enter' && doRegister());
+}
+
+// 发帖状态：标签数组 + 选中分区 key + 置顶 + 已上传图片 + 管理员分区选定
+let draftPostTags = [];
+let draftPostCategory = 'general';
+let draftPostPinned = false;
+let draftPostImages = [];  // [{ id, url, dataUrl, filename }]
+let draftPostRegion = '';   // 运维管理员选定的帖子分区（2611/2612/2621/2622，空=按作者UID前缀过滤）
+
+function renderPost(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  const me = api.getCurrentUser();
+  const isAdmin = me && api.ADMIN_ROLES.has(String(me.role || ''));
+  draftPostTags = [];
+  draftPostCategory = 'general';
+  draftPostPinned = false;
+  draftPostRegion = '';
+  draftPostImages = [];  // 重置图片
+
+  // 分区下拉选项：meta 仅管理员可见
+  const visibleCategories = CATEGORIES.filter(c => isAdmin || !c.adminOnly);
+
+  app.innerHTML = `
+    <div class="card">
+      <h3>发新帖</h3>
+
+      <div style="margin-bottom:14px">
+        <label for="categorySelect" style="font-size:13px;color:#424245;display:block;margin-bottom:8px">
+          📂 分区（必选）
+        </label>
+        <select id="categorySelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          ${visibleCategories.map(c => {
+            const pad = c.adminOnly ? ' 🔒管' : '';
+            return `<option value="${escapeHtml(c.key)}">${escapeHtml(c.label)}${pad}　— ${escapeHtml(c.description || '')}</option>`;
+          }).join('')}
+        </select>
+      </div>
+
+      <input id="titleInput" placeholder="标题（必填，100字内）" maxlength="100">
+      <textarea id="contentInput" placeholder="说点什么...（必填，2000字内）" maxlength="2000"></textarea>
+
+      <div style="margin-bottom:14px">
+        <label for="tagInput" style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
+          🏷 标签（最多 5 个，每个 ≤20 字，用 # 分隔）
+        </label>
+        <div id="tagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+        <input id="tagInput"
+               placeholder="用 # 分隔标签，例：#高二#数学#社团招新"
+               maxlength="200"
+               style="width:100%">
+        <p class="hint" style="margin:2px 0 0 0">
+          💡 输入 # 确认一个标签（最多 5 个，每个 ≤20 字）。分区用于大分类，标签用于细分话题。
+        </p>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
+          🖼 图片（可选，最多 9 张，单张不超过 5MB）
+        </label>
+        <div id="imagePreviewList" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+        <label id="imageUploadBtn" style="display:inline-flex;align-items:center;gap:4px;padding:6px 14px;border:1px solid #d2d2d7;border-radius:8px;cursor:pointer;font-size:13px;color:#424245;background:#f9fafb">
+          📷 选择图片
+          <input id="imageFileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple style="display:none">
+        </label>
+        <span id="imageUploadStatus" class="hint" style="margin-left:8px"></span>
+      </div>
+
+      ${isAdmin ? `
+      <div style="margin-bottom:14px;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="pinCheckbox" style="width:16px;height:16px;cursor:pointer">
+        <label for="pinCheckbox" style="font-size:13px;color:#424245;cursor:pointer">📌 置顶此帖（管理员专属，置顶帖将显示在列表最前面）</label>
+      </div>
+      <div style="margin-bottom:14px">
+        <label for="postRegionSelect" style="font-size:13px;color:#424245;display:block;margin-bottom:6px">
+          🗺 发布分区（管理员专属：选择此帖在哪个校区/年级分区可见；不选则所有分区可见）
+        </label>
+        <select id="postRegionSelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff">
+          <option value="">全部分区可见（不指定）</option>
+          ${REGIONS.map(r => `<option value="${r.prefix}">${escapeHtml(r.label)}</option>`).join('')}
+        </select>
+      </div>
+      ` : ''}
+
+      <button id="postBtn" onclick="doPost()">发布</button>
+      <button class="secondary" onclick="location.hash='forum'">取消</button>
+    </div>
+  `;
+
+  // --- 分区下拉逻辑 ---
+  const catSelect = document.getElementById('categorySelect');
+  catSelect.addEventListener('change', () => {
+    draftPostCategory = catSelect.value;
+  });
+
+  // --- 置顶 checkbox（管理员）---
+  const pinCheckbox = document.getElementById('pinCheckbox');
+  if (pinCheckbox) {
+    pinCheckbox.addEventListener('change', () => {
+      draftPostPinned = pinCheckbox.checked;
+    });
+  }
+  // --- 发布分区下拉（管理员）---
+  const regionSelect = document.getElementById('postRegionSelect');
+  if (regionSelect) {
+    regionSelect.addEventListener('change', () => {
+      draftPostRegion = regionSelect.value;
+    });
+  }
+
+  // --- 多标签 chip 逻辑 ---
+  const tagInput = document.getElementById('tagInput');
+  const chipsBox = document.getElementById('tagChips');
+  function renderChips() {
+    chipsBox.innerHTML = draftPostTags.map((t, i) =>
+      `<span class="tag-chip input-chip">#${escapeHtml(t)}<button class="chip-close" data-idx="${i}" aria-label="删除该标签">×</button></span>`
+    ).join('');
+    chipsBox.querySelectorAll('.chip-close').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+        draftPostTags.splice(idx, 1);
+        renderChips();
+      });
+    });
+  }
+  // 标签以 # 为分隔符：用户自己打 # 开头，遇到 # 就分割成新标签
+  function addTagFromInput() {
+    const raw = (tagInput.value || '').trim();
+    if (!raw) return false;
+    // 按 # 分割，去掉首尾空格，过滤空串
+    const items = raw.split(/#+/).map(s => s.trim()).filter(Boolean);
+    if (items.length === 0) return false;
+    for (const it of items) {
+      const t = it.slice(0, 20);
+      if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
+    }
+    tagInput.value = '';
+    renderChips();
+    return true;
+  }
+  // 遇到 # 号立即分割（用户每打一个 # 就把前面的文本收为标签）
+  // 回车也确认（把当前输入框残留的最后一个标签收进来）
+  tagInput.addEventListener('keydown', e => {
+    if (e.key === '#' || e.key === 'Enter') {
+      // # 号：先把 # 之前的文本提取为标签，再让 # 正常输入（方便用户继续打下一个标签）
+      if (e.key === '#') {
+        const beforeHash = tagInput.value;
+        if (beforeHash) {
+          // 立即把 # 之前的内容提取为标签
+          const items = beforeHash.split(/#+/).map(s => s.trim()).filter(Boolean);
+          for (const it of items) {
+            const t = it.slice(0, 20);
+            if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
+          }
+          tagInput.value = '';
+          renderChips();
+        }
+        // 让 # 正常输入，不打断
+      } else {
+        // 回车：确认全部
+        e.preventDefault();
+        addTagFromInput();
+      }
+    } else if (e.key === 'Backspace' && tagInput.value === '' && draftPostTags.length > 0) {
+      draftPostTags.pop();
+      renderChips();
+    }
+  });
+  // 失焦 / 粘贴也确认
+  tagInput.addEventListener('blur', () => addTagFromInput());
+  tagInput.addEventListener('paste', e => {
+    setTimeout(addTagFromInput, 0);
+  });
+  renderChips();
+
+  // --- 图片上传逻辑 ---
+  const imageFileInput = document.getElementById('imageFileInput');
+  const imagePreviewList = document.getElementById('imagePreviewList');
+  const imageUploadStatus = document.getElementById('imageUploadStatus');
+
+  function renderImagePreviews() {
+    if (!imagePreviewList) return;
+    if (draftPostImages.length === 0) {
+      imagePreviewList.innerHTML = '';
+      return;
+    }
+    imagePreviewList.innerHTML = draftPostImages.map((img, idx) => {
+      const thumbUrl = img.url || img.dataUrl;
+      return `<div style="position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:1px solid #d2d2d7">
+        <img src="${escapeHtml(thumbUrl)}" style="width:100%;height:100%;object-fit:cover" alt="图片 ${idx + 1}">
+        <button type="button" data-img-idx="${idx}" style="position:absolute;top:2px;right:2px;width:20px;height:20px;border:none;border-radius:50%;background:rgba(0,0,0,0.6);color:#fff;font-size:12px;cursor:pointer;line-height:1">×</button>
+      </div>`;
+    }).join('');
+    // 绑定删除按钮
+    imagePreviewList.querySelectorAll('[data-img-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.getAttribute('data-img-idx'), 10);
+        draftPostImages.splice(idx, 1);
+        renderImagePreviews();
+      });
+    });
+  }
+
+  if (imageFileInput) {
+    imageFileInput.addEventListener('change', async () => {
+      const files = imageFileInput.files;
+      if (!files || files.length === 0) return;
+      if (draftPostImages.length + files.length > 9) {
+        imageUploadStatus.textContent = '最多 9 张图片，已自动截断';
+      }
+      const remaining = 9 - draftPostImages.length;
+      const toUpload = Array.from(files).slice(0, remaining);
+      imageUploadStatus.textContent = `正在上传 ${toUpload.length} 张图片...`;
+
+      for (const file of toUpload) {
+        try {
+          // 压缩
+          const compressed = await compressImage(file);
+          // 上传到服务端
+          const res = await api.images.upload(compressed.dataUrl, file.name);
+          if (res.success) {
+            draftPostImages.push({
+              id: res.data.id,
+              url: res.data.url,
+              dataUrl: compressed.dataUrl,
+              filename: res.data.filename || file.name,
+            });
+          } else {
+            console.warn('图片上传失败:', res.message);
+          }
+        } catch (err) {
+          console.warn('图片处理失败:', err.message);
+        }
+      }
+      imageUploadStatus.textContent = draftPostImages.length > 0
+        ? `✅ 已上传 ${draftPostImages.length} 张图片`
+        : '';
+      renderImagePreviews();
+      imageFileInput.value = ''; // 允许重复选同一文件
+    });
+  }
+}
+
+// ==================== 视图：帖子详情 + 评论区 + 楼中楼 + 点赞/收藏 ====================
+async function renderDetail(app, postId) {
+  app.innerHTML = `<div class="card">🔄 正在加载帖子...</div>`;
+  const postRes = await api.posts.byId(postId);
+  if (!postRes.success) {
+    app.innerHTML = `<div class="card">❌ 帖子加载失败：${escapeHtml(postRes.message)}</div>`;
+    return;
+  }
+  const p = postRes.data;
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+  const pinBadge = p.isPinned
+    ? `<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>`
+    : '';
+  const catBadge = categoryBadgeHtml(p.category);
+  const tagsHtml = (Array.isArray(p.tags) && p.tags.length)
+    ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+         ${p.tags.map(t => `<span class="tag-chip" onclick="location.hash='forum';setTimeout(()=>setHomeFilter('tag',${escapeHtml(JSON.stringify(t))}),0)" title="按标签「${escapeHtml(t)}」筛选">#${escapeHtml(t)}</span>`).join('')}
+       </div>`
+    : '';
+
+  // 图片展示
+  const imagesHtml = (Array.isArray(p.imageIds) && p.imageIds.length)
+    ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+         ${p.imageIds.map(id => {
+           const url = api.images.getUrl(id);
+           return `<img src="${escapeHtml(url)}" alt="图片" onclick="window.open('${escapeHtml(url)}','_blank')" style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer" title="点击查看原图">`;
+         }).join('')}
+       </div>`
+    : '';
+
+  // 作者可点击进主页（头像+昵称+公会+Lv）
+  const detailAuthorUser = { uid: p.authorUid, nickname: p.authorNickname, avatarUrl: p.authorAvatarUrl, createdAt: p.createdAt, updatedAt: p.authorUpdatedAt };
+  const detailAuthorLevel = api.getLevelInfo(p.authorExpPoints, p.authorRole);
+  const detailGuild = guildBadge(p);
+  const detailLevelBadge = `<span class="level-badge${detailAuthorLevel.isAdmin ? ' admin' : ''}">Lv.${detailAuthorLevel.level}</span>`;
+  const detailAuthorHtml = `<span class="post-author" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(p.authorUid)}'"><span class="avatar-sm post-avatar">${buildAvatarInner(detailAuthorUser)}</span><span class="post-author-name">${escapeHtml(p.authorNickname || `用户${p.authorUid}`)}</span>${detailGuild}${detailLevelBadge}</span>`;
+
+  app.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="ghost" onclick="location.hash='forum'">← 返回列表</button>
+    </div>
+    <div class="card detail-header">
+      <div class="meta">
+        ${pinBadge}${catBadge}${detailAuthorHtml}
+        <span>·</span><span>${escapeHtml(formatTime(p.createdAt))}</span>
+        <span>·</span><span>👁 ${p.viewCount} 浏览</span>
+        <span>·</span><span style="font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 6px;border-radius:4px" title="帖子编号">#${p.id}</span>
+      </div>
+      <h2>${escapeHtml(p.title)}</h2>
+      <div class="detail-body">${escapeHtml(normalizeNewlines(p.content))}</div>
+      ${imagesHtml}
+      ${tagsHtml}
+      <div class="action-bar">
+        <button id="likeBtn" class="${p.isLiked ? 'active-like' : ''}">
+          ${p.isLiked ? '♥ 已赞' : '♡ 点赞'} <span id="likeCount">${p.likeCount}</span>
+        </button>
+        <button id="favBtn" class="${p.isFavorited ? 'active-fav' : ''}">
+          ${p.isFavorited ? '★ 已收藏' : '☆ 收藏'}
+        </button>
+        <button class="secondary" onclick="document.getElementById('commentInput').focus()">💬 评论 (${p.commentCount})</button>
+        ${(me && (me.uid === p.authorUid || me.role === 'ops_admin'))
+          ? `<button id="delPostBtn" class="danger">🗑 删除帖子</button>` : ''}
+        ${(me && (me.role === 'admin'))
+          ? `<button id="reqDelPostBtn" class="secondary" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe">📝 申请删除帖子</button>` : ''}
+        ${(me && (me.role === 'ops_admin'))
+          ? `<button id="editPostBtn" class="secondary">✏️ 编辑帖子</button>` : ''}
+      </div>
+    </div>
+
+    <!-- 管理员编辑帖子弹窗 -->
+    <div id="editPanel" style="display:none;margin-top:12px"></div>
+
+    <div class="card comments-section">
+      <h3>评论 (${p.commentCount})</h3>
+      ${me ? `
+      <div class="comment-box">
+        <textarea id="commentInput" placeholder="写下你的评论...（1000字内）" maxlength="1000"></textarea>
+        <button id="submitCommentBtn">发表评论</button>
+      </div>` : '<p class="hint">登录后才能评论哦～ <a href="#login">点此登录</a></p>'}
+      <div id="commentList">🔄 加载评论中...</div>
+    </div>
+  `;
+
+  // ---- 点赞按钮 ----
+  const likeBtn = document.getElementById('likeBtn');
+  likeBtn.addEventListener('click', async () => {
+    likeBtn.disabled = true;
+    const r = await api.likes.toggle(p.id);
+    likeBtn.disabled = false;
+    if (r.success) {
+      const liked = r.data.liked;
+      likeBtn.className = liked ? 'active-like' : '';
+      likeBtn.firstChild.nodeValue = liked ? '♥ 已赞 ' : '♡ 点赞 ';
+      document.getElementById('likeCount').textContent = r.data.likeCount;
+    } else alert(r.message || '操作失败');
+  });
+
+  // ---- 收藏按钮 ----
+  const favBtn = document.getElementById('favBtn');
+  favBtn.addEventListener('click', async () => {
+    favBtn.disabled = true;
+    const r = await api.favorites.toggle(p.id);
+    favBtn.disabled = false;
+    if (r.success) {
+      const fav = r.data.favorited;
+      favBtn.className = fav ? 'active-fav' : '';
+      favBtn.firstChild.nodeValue = fav ? '★ 已收藏' : '☆ 收藏';
+    } else alert(r.message || '操作失败');
+  });
+
+  // ---- 申请删除帖子（admin 角色按钮）----
+  const reqDelPostBtn = document.getElementById('reqDelPostBtn');
+  if (reqDelPostBtn) {
+    reqDelPostBtn.addEventListener('click', () => {
+      openAdminRequestDialog({ presetType: 'delete_post', presetTargetId: String(p.id) });
+    });
+  }
+
+  // ---- 删帖 ----
+  const delPostBtn = document.getElementById('delPostBtn');
+  if (delPostBtn) {
+    delPostBtn.addEventListener('click', async () => {
+      if (!confirm('确定要删除该帖子吗？将无法恢复。')) return;
+      delPostBtn.disabled = true;
+      const r = await api.posts.remove(p.id);
+      if (r.success) { alert('已删除'); location.hash = 'forum'; }
+      else { delPostBtn.disabled = false; alert(r.message); }
+    });
+  }
+
+  // ---- 管理员编辑帖子 ----
+  const editPostBtn = document.getElementById('editPostBtn');
+  if (editPostBtn) {
+    editPostBtn.addEventListener('click', () => {
+      const panel = document.getElementById('editPanel');
+      const isVisible = panel.style.display !== 'none';
+      if (isVisible) { panel.style.display = 'none'; return; }
+
+      // 初始化编辑表单，预填当前帖子内容
+      const editTags = Array.isArray(p.tags) ? [...p.tags] : [];
+      const editCats = CATEGORIES.filter(c => true); // 管理员可见全部分区
+      panel.style.display = 'block';
+      panel.innerHTML = `
+        <div class="card" style="border:2px solid #2563eb">
+          <h3>✏️ 管理员编辑帖子</h3>
+          <p class="hint">编辑后保存，发帖时间保持不变，仅更新内容。</p>
+
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">📂 分区</label>
+          <select id="editCategorySelect" style="width:100%;padding:8px 10px;border:1px solid #d2d2d7;border-radius:8px;font-size:14px;background:#fff;margin-bottom:14px">
+            ${editCats.map(c => `<option value="${escapeHtml(c.key)}" ${c.key === p.category ? 'selected' : ''}>${escapeHtml(c.label)}${c.adminOnly?' 🔒管':''}　— ${escapeHtml(c.description||'')}</option>`).join('')}
+          </select>
+
+          <input id="editTitleInput" placeholder="标题" maxlength="100" style="margin-bottom:10px" value="${escapeHtml(p.title)}">
+          <textarea id="editContentInput" placeholder="内容" maxlength="2000" style="margin-bottom:10px">${escapeHtml(p.content)}</textarea>
+
+          <label style="font-size:13px;color:#424245;display:block;margin-bottom:6px">🏷 标签（用 # 分隔，最多 5 个）</label>
+          <div id="editTagChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+          <input id="editTagInput" placeholder="用 # 分隔标签，例：#高二#数学" maxlength="200" style="width:100%;margin-bottom:10px">
+
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;padding:8px 10px;background:#fef3c7;border-radius:8px">
+            <input type="checkbox" id="editPinCheckbox" style="width:16px;height:16px;cursor:pointer" ${p.isPinned ? 'checked' : ''}>
+            <label for="editPinCheckbox" style="font-size:13px;color:#424245;cursor:pointer">📌 置顶此帖（管理员专属，置顶帖显示在列表最前面）</label>
+          </div>
+
+          <button id="saveEditBtn" onclick="window._doEditPost(${p.id}, ${!!p.isPinned})">保存修改</button>
+          <button class="secondary" id="cancelEditBtn">取消</button>
+        </div>
+      `;
+
+      // 标签 chip 逻辑（复用 # 分隔逻辑）
+      const editTagInput = document.getElementById('editTagInput');
+      const editChipsBox = document.getElementById('editTagChips');
+      function renderEditChips() {
+        editChipsBox.innerHTML = editTags.map((t, i) =>
+          `<span class="tag-chip input-chip">#${escapeHtml(t)}<button class="chip-close" data-idx="${i}" aria-label="删除">×</button></span>`
+        ).join('');
+        editChipsBox.querySelectorAll('.chip-close').forEach(btn => {
+          btn.addEventListener('click', e => {
+            editTags.splice(parseInt(e.currentTarget.getAttribute('data-idx'), 10), 1);
+            renderEditChips();
+          });
+        });
+      }
+      function addEditTagFromInput() {
+        const raw = (editTagInput.value || '').trim();
+        if (!raw) return;
+        const items = raw.split(/#+/).map(s => s.trim()).filter(Boolean);
+        for (const it of items) {
+          const t = it.slice(0, 20);
+          if (!editTags.includes(t) && editTags.length < 5 && !/["'\\<>{}]/.test(t)) editTags.push(t);
+        }
+        editTagInput.value = '';
+        renderEditChips();
+      }
+      editTagInput.addEventListener('keydown', e => {
+        if (e.key === '#' && editTagInput.value) {
+          const items = editTagInput.value.split(/#+/).map(s => s.trim()).filter(Boolean);
+          for (const it of items) {
+            const t = it.slice(0, 20);
+            if (!editTags.includes(t) && editTags.length < 5 && !/["'\\<>{}]/.test(t)) editTags.push(t);
+          }
+          editTagInput.value = '';
+          renderEditChips();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          addEditTagFromInput();
+        }
+      });
+      editTagInput.addEventListener('blur', () => addEditTagFromInput());
+      renderEditChips();
+
+      document.getElementById('cancelEditBtn').addEventListener('click', () => {
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+      });
+    });
+  }
+
+  // ---- 提交评论 ----
+  const submitCommentBtn = document.getElementById('submitCommentBtn');
+  if (submitCommentBtn) {
+    submitCommentBtn.addEventListener('click', () => submitComment(postId));
+  }
+
+  // ---- 拉评论 + 渲染楼中楼 ----
+  loadAndRenderComments(postId);
+}
+
+async function loadAndRenderComments(postId) {
+  const container = document.getElementById('commentList');
+  if (!container) return;
+  const res = await api.comments.byPost(postId);
+  if (!res.success) { container.innerHTML = `<div class="card">❌ 评论加载失败：${escapeHtml(res.message)}</div>`; return; }
+  const all = res.data || [];
+  if (all.length === 0) { container.innerHTML = `<div class="empty" style="padding:20px">还没有评论，快来抢沙发～</div>`; return; }
+
+  // 建立索引
+  const byId = new Map(all.map(c => [c.id, c]));
+  // 计算父子关系
+  const childrenOf = new Map();
+  const rootComments = [];
+  for (const c of all) {
+    if (c.replyToId && byId.has(c.replyToId)) {
+      if (!childrenOf.has(c.replyToId)) childrenOf.set(c.replyToId, []);
+      childrenOf.get(c.replyToId).push(c);
+    } else {
+      rootComments.push(c);
+    }
+  }
+
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+
+  function renderComment(c, isReply) {
+    const deleted = c.isHidden;
+    const contentHtml = deleted
+      ? `<div class="comment-content deleted">（该评论已被删除）</div>`
+      : `<div class="comment-content">${escapeHtml(c.content || '')}</div>`;
+    const replyRef = (isReply && c.replyToId && byId.has(c.replyToId))
+      ? `<div class="reply-ref">回复 <b>@${escapeHtml(c.replyToAuthorNickname || '已删除用户')}</b>：</div>`
+      : '';
+    const canReply = me && !deleted;
+    const canDelete = me && !deleted && (me.uid === c.authorUid || me.role === 'ops_admin');
+    const canEdit = me && !deleted && (me.role === 'ops_admin');
+    const canRequestDelete = me && !deleted && me.role === 'admin';
+
+    // 评论作者信息（头像+昵称+Lv）
+    let headerLeft;
+    if (deleted) {
+      headerLeft = `<span class="comment-author">已删除用户</span>`;
+    } else {
+      const authorLevel = api.getLevelInfo(c.authorExpPoints, c.authorRole);
+      const authorGuild = guildBadge(c);
+      const authorUser = { uid: c.authorUid, nickname: c.authorNickname, avatarUrl: c.authorAvatarUrl, createdAt: c.createdAt };
+      const lvlBadge = `<span class="level-badge${authorLevel.isAdmin ? ' admin' : ''}">Lv.${authorLevel.level}</span>`;
+      headerLeft = `<span class="comment-author-info" title="查看作者主页" onclick="location.hash='#user/${escapeHtml(c.authorUid)}'">
+        <span class="avatar-xs comment-avatar">${buildAvatarInner(authorUser)}</span>
+        <span class="comment-author">${escapeHtml(c.authorNickname || `用户${c.authorUid}`)}</span>
+        ${authorGuild}
+        ${lvlBadge}
+      </span>`;
+    }
+
+    return `
+      <div class="comment-item ${isReply ? 'reply' : ''}" data-comment-id="${c.id}">
+        <div class="comment-header">
+          <span>${headerLeft} · ${escapeHtml(formatTime(c.createdAt))} <span style="font-size:10px;color:#9ca3af;background:#f3f4f6;padding:0 5px;border-radius:3px;margin-left:2px" title="评论编号">#${c.id}</span></span>
+          ${canDelete ? `<button class="ghost danger-style" onclick="deleteComment(${c.id}, ${postId})" style="color:#ff3b30;background:none">删除</button>` : ''}
+          ${canEdit ? `<button class="ghost" onclick="toggleEditComment(${c.id})" style="color:#2563eb;background:none">编辑</button>` : ''}
+          ${canRequestDelete ? `<button class="ghost" onclick="openAdminRequestDialog({presetType:'delete_comment',presetTargetId:'${c.id}'})" style="color:#1d4ed8;background:none;font-size:12px">📝 申请删除</button>` : ''}
+        </div>
+        ${replyRef}
+        <div id="comment-content-${c.id}">${contentHtml}</div>
+        ${canEdit ? `
+          <div class="edit-comment-box" id="edit-comment-${c.id}" style="display:none;margin-top:6px">
+            <textarea placeholder="编辑评论..." maxlength="1000" style="width:100%;min-height:60px;margin-bottom:6px">${escapeHtml(c.content || '')}</textarea>
+            <button onclick="saveEditComment(${c.id}, ${postId}, this)" style="padding:4px 12px;font-size:13px">保存</button>
+            <button class="secondary" onclick="document.getElementById('edit-comment-${c.id}').style.display='none'" style="padding:4px 12px;font-size:13px">取消</button>
+          </div>
+        ` : ''}
+        ${canReply ? `
+          <div class="comment-actions">
+            <button class="ghost" onclick="toggleReplyInput(${c.id})">↩ 回复</button>
+          </div>
+          <div class="reply-input" id="reply-${c.id}">
+            <textarea placeholder="回复 @${escapeHtml(c.authorNickname || 'TA')}..." maxlength="1000"></textarea>
+            <button onclick="submitReply(${postId}, ${c.id}, this)">发送</button>
+          </div>
+        ` : ''}
+        ${(childrenOf.get(c.id) || []).map(child => renderComment(child, true)).join('')}
+      </div>
+    `;
+  }
+
+  container.innerHTML = rootComments.map(c => renderComment(c, false)).join('');
+}
+
+// 评论/回复辅助（全局可用，onclick 内联调用）
+window.submitComment = async function submitComment(postId) {
+  const el = document.getElementById('commentInput');
+  const content = (el.value || '').trim();
+  if (!content) return alert('评论内容不能为空');
+  const btn = document.getElementById('submitCommentBtn');
+  btn.disabled = true; btn.textContent = '发送中...';
+  const r = await api.comments.create({ postId, content });
+  btn.disabled = false; btn.textContent = '发表评论';
+  if (r.success) { el.value = ''; loadAndRenderComments(postId); }
+  else alert(r.message || '评论失败');
+};
+window.toggleReplyInput = function toggleReplyInput(commentId) {
+  const box = document.getElementById('reply-' + commentId);
+  if (box) box.classList.toggle('open');
+};
+window.submitReply = async function submitReply(postId, replyToId, btnEl) {
+  const wrap = btnEl.closest('.reply-input');
+  const ta = wrap.querySelector('textarea');
+  const content = (ta.value || '').trim();
+  if (!content) return alert('回复内容不能为空');
+  btnEl.disabled = true;
+  const r = await api.comments.create({ postId, content, replyToId });
+  btnEl.disabled = false;
+  if (r.success) { ta.value = ''; loadAndRenderComments(postId); }
+  else alert(r.message || '回复失败');
+};
+window.deleteComment = async function deleteComment(commentId, postId) {
+  if (!confirm('确定删除这条评论吗？')) return;
+  const r = await api.comments.remove(commentId);
+  if (r.success) loadAndRenderComments(postId);
+  else alert(r.message || '删除失败');
+};
+window.toggleEditComment = function toggleEditComment(commentId) {
+  const box = document.getElementById('edit-comment-' + commentId);
+  if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none';
+};
+window.saveEditComment = async function saveEditComment(commentId, postId, btnEl) {
+  const wrap = btnEl.closest('.edit-comment-box');
+  const ta = wrap.querySelector('textarea');
+  const content = (ta.value || '').trim();
+  if (!content) return alert('评论内容不能为空');
+  btnEl.disabled = true; btnEl.textContent = '保存中...';
+  try {
+    const r = await api.comments.update(commentId, content);
+    if (r.success) {
+      // 更新评论内容显示（不重新拉全部）
+      const contentDiv = document.getElementById('comment-content-' + commentId);
+      if (contentDiv) contentDiv.innerHTML = `<div class="comment-content">${escapeHtml(content)}</div>`;
+      wrap.style.display = 'none';
+    } else {
+      alert(r.message || '编辑失败');
+    }
+  } finally {
+    btnEl.disabled = false; btnEl.textContent = '保存';
+  }
+};
+
+// ==================== 视图：个人中心（我的帖 / 我点赞 / 我收藏） ====================
+// 生成头像内部 HTML：首字母占位 + 可选图片绝对覆盖（图片加载失败 onerror 自动隐藏 → 露出首字母）
+// overrideSrc：上传完用本地 object URL 立即预览，绕过 KV 最终一致性延迟
+function buildAvatarInner(user, overrideSrc) {
+  const initials = ((user && (user.nickname || user.uid)) || '?').slice(0, 1).toUpperCase();
+  const src = overrideSrc != null ? overrideSrc : api.getAvatarUrl(user);
+  return `<span class="avatar-initials">${escapeHtml(initials)}</span>` +
+    (src ? `<img class="avatar-img" src="${escapeHtml(src)}" alt="头像" onerror="this.style.display='none'">` : '');
+}
+// 上传完但 KV 还没全球同步时的本地预览 URL；renderMe 重新进入时清空（那时 KV 已同步）
+let _pendingAvatarSrc = null;
+// 用指定 src 刷新个人主页两处头像（顶部 header + 编辑预览），不动文本和输入框
+function setAvatarPreviewsSrc(src) {
+  const me = api.getCurrentUser();
+  const html = buildAvatarInner(me, src);
+  const h = document.getElementById('meHeaderAvatar'); if (h) h.innerHTML = html;
+  const p = document.getElementById('editAvatarPreview'); if (p) p.innerHTML = html;
+}
+// 角色徽章（个人主页 header 用）
+function roleBadgeInline(role) {
+  if (role === 'ops_admin') return ' <span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">运维管理员</span>';
+  if (role === 'admin') return ' <span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">管理员</span>';
+  return '';
+}
+// 资料变更后局部刷新：个人主页顶部 header（头像+昵称+简介）+ 编辑表单预览 + 顶栏昵称
+// 不动 meContent 里的输入框，避免用户正在编辑的内容被清掉
+function refreshMyProfileDisplay() {
+  const me = api.getCurrentUser();
+  if (!me) return;
+  const header = document.getElementById('meProfileHeader');
+  if (header) {
+    header.innerHTML = `
+      <div class="avatar-lg" id="meHeaderAvatar">${buildAvatarInner(me, _pendingAvatarSrc)}</div>
+      <div style="flex:1">
+        <div class="profile-name">${escapeHtml(me.nickname)}${roleBadgeInline(me.role)}</div>
+        <div class="profile-uid">UID：${escapeHtml(me.uid)}　角色：${escapeHtml(me.role || 'member')}</div>
+        ${me.bio ? `<div class="profile-bio">${escapeHtml(me.bio)}</div>` : ''}
+      </div>
+    `;
+  }
+  const preview = document.getElementById('editAvatarPreview');
+  if (preview) preview.innerHTML = buildAvatarInner(me, _pendingAvatarSrc);
+  if (typeof renderTopBar === 'function') renderTopBar();
+}
+
+// ==================== 视图：积分等级页（签到板块 + 日历 + 进度条 + 规则 + 等级表）====================
+async function renderExp(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+
+  app.innerHTML = `<div class="empty">🔄 正在读取积分...</div>`;
+
+  // 并行拉：最新积分 + 签到日历
+  const now = new Date();
+  const cYear = now.getUTCFullYear();
+  const cMonth = now.getUTCMonth() + 1;
+  _checkinYear = cYear; _checkinMonth = cMonth; // 初始化日历月份
+  let expPoints = 0;
+  let myRole = '';
+  let calData = { year: cYear, month: cMonth, checkedDates: [], streak: 0, todayChecked: false };
+
+  try {
+    const [meRes, calRes] = await Promise.all([
+      api.auth.me().catch(() => null),
+      api.checkin.calendar(cYear, cMonth).catch(() => null),
+    ]);
+    if (meRes && meRes.success && meRes.data) {
+      expPoints = Number(meRes.data.expPoints || 0);
+      myRole = meRes.data.role || '';
+    }
+    if (calRes && calRes.success && calRes.data) calData = calRes.data;
+  } catch {}
+
+  const info = api.getLevelInfo(expPoints, myRole);
+  const pct = Math.round(info.progress * 100);
+
+  // 取 Lv.N 起点所需积分
+  const levelStart = (lv) => {
+    if (lv <= api.LEVEL_THRESHOLDS.length) return api.LEVEL_THRESHOLDS[lv - 1];
+    const last = api.LEVEL_THRESHOLDS[api.LEVEL_THRESHOLDS.length - 1];
+    return last + api.LEVEL_STEP_BEYOND * (lv - api.LEVEL_THRESHOLDS.length);
+  };
+
+  // 等级表前 15 行
+  const levelRows = [];
+  for (let lv = 1; lv <= 15; lv++) {
+    const base = levelStart(lv);
+    const nextBase = levelStart(lv + 1);
+    const isCur = lv === info.level;
+    levelRows.push(`<tr class="${isCur ? 'exp-cur-level' : ''}">
+      <td>Lv.${lv}</td><td>${base}</td><td>${nextBase}</td><td>${isCur ? '← 当前' : ''}</td>
+    </tr>`);
+  }
+
+  // 行为积分规则
+  const rules = [
+    ['📝 发帖', `+${api.EXP.POST} 积分`],
+    ['💬 评论', `+${api.EXP.COMMENT} 积分`],
+    ['❤️ 帖子被点赞', `+${api.EXP.LIKED} 积分（加给帖作者，自己赞自己不加分）`],
+    ['↩️ 评论被回复', `+${api.EXP.REPLIED} 积分（加给被回复者）`],
+    ['👀 浏览帖子', `+${api.EXP.BROWSE} 积分/帖，每日上限 ${api.EXP.BROWSE_DAILY_LIMIT} 积分`],
+    ['📅 每日签到', `+${api.EXP.CHECKIN_BASE} 积分/天，每连续 ${api.EXP.CHECKIN_STREAK_DAYS} 天额外 +${api.EXP.CHECKIN_STREAK_BONUS} 积分`],
+  ];
+
+  // ===== 签到板块（独立卡片）=====
+  const todayStr = now.toISOString().slice(0, 10);
+  // 签到按钮状态
+  const checkinBtnHtml = calData.todayChecked
+    ? `<button disabled style="opacity:.5;cursor:not-allowed">✅ 今日已签到</button>`
+    : `<button id="doCheckinBtn" onclick="doCheckinAction()">📅 立即签到 (+${api.EXP.CHECKIN_BASE} 积分)</button>`;
+
+  // ===== 签到日历（独立卡片，周一开头 + 6×7 完整网格）=====
+  const monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+  const weekDaysCN = ['周一','周二','周三','周四','周五','周六','周日'];
+  const thisYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 11 }, (_, i) => thisYear - 5 + i);
+
+  // 生成日历网格（42 格 = 6行×7列）
+  const buildCalCells = (year, month, checkedDates) => {
+    const firstDay = new Date(year, month - 1, 1);
+    const startWeekday = (firstDay.getUTCDay() + 6) % 7; // 周一=0
+    const daysInMonth = new Date(year, month, 0).getUTCDate();
+    const checkedSet = new Set((checkedDates || []).map(d => d.date));
+    const tStr = new Date().toISOString().slice(0, 10);
+    const cells = [];
+    for (let i = 0; i < startWeekday; i++) cells.push(`<span class="ckin-cell empty"></span>`);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const isChk = checkedSet.has(ds);
+      const isTd = ds === tStr;
+      cells.push(`<span class="ckin-cell${isChk ? ' checked' : ''}${isTd ? ' today' : ''}">${d}${isChk ? '<em>✓</em>' : ''}</span>`);
+    }
+    // 补齐到 42 格
+    while (cells.length < 42) cells.push(`<span class="ckin-cell empty"></span>`);
+    return cells.join('');
+  };
+  const calCellsHtml = buildCalCells(calData.year, calData.month, calData.checkedDates);
+
+  // 今日运势：**只有今日已签到** 才显示（未签到 / 未完成签到动作前一律隐藏）
+  const fortuneHtml = (calData.todayChecked && calData.fortune)
+    ? `<div class="checkin-fortune" id="checkinFortune" style="color:${calData.fortuneColor || '#2563eb'}">
+         <span class="checkin-fortune-emoji">${calData.fortuneEmoji || '🎭'}</span>
+         <span class="checkin-fortune-text">今日运势：<b>${calData.fortune}</b></span>
+       </div>`
+    : `<div class="checkin-fortune" id="checkinFortune" style="display:none"></div>`;
+
+  app.innerHTML = `
+    <!-- 签到板块（独立卡片）-->
+    <div class="card checkin-card">
+      <div class="checkin-top">
+        <div class="checkin-info">
+          <div class="checkin-date">📅 ${todayStr}</div>
+          <div class="checkin-streak">🔥 连续签到 <b>${calData.streak || 0}</b> 天</div>
+        </div>
+        <div class="checkin-btn">${checkinBtnHtml}</div>
+      </div>
+      ${fortuneHtml}
+    </div>
+
+    <!-- 签到日历（独立卡片，缩小版导航栏日历风格）-->
+    <div class="card ckin-cal-card" id="checkinCalWrap">
+      <div class="ckin-cal-toolbar">
+        <label class="ckin-cal-label">📅 签到日历
+          <select id="ckinYearSel">
+            ${yearOptions.map(y => `<option value="${y}" ${y === calData.year ? 'selected' : ''}>${y}</option>`).join('')}
+          </select>
+          <select id="ckinMonthSel">
+            ${monthNames.map((name, i) => `<option value="${i + 1}" ${i + 1 === calData.month ? 'selected' : ''}>${name}</option>`).join('')}
+          </select>
+        </label>
+        <button class="ghost" id="ckinTodayBtn" style="font-size:13px;padding:2px 10px">今天</button>
+      </div>
+      <div class="ckin-cal-weekdays">
+        ${weekDaysCN.map(w => `<span>${w}</span>`).join('')}
+      </div>
+      <div class="ckin-cal-grid" id="ckinGrid">${calCellsHtml}</div>
+    </div>
+
+    <div class="card exp-hero">
+      <div class="exp-level-row">
+        <div class="exp-level-badge">Lv.${info.level}</div>
+        <div class="exp-level-meta">
+          <div class="exp-points">累计积分 <b>${info.exp}</b></div>
+        </div>
+      </div>
+      <div class="exp-progress-wrap">
+        <div class="exp-progress-bar"><div class="exp-progress-fill" style="width:${pct}%"></div></div>
+        <div class="exp-progress-text">
+          <span>当前 Lv.${info.level}（起点 ${info.currentBase} 分）</span>
+          <span>距下一级还差 <b>${info.toNext}</b> 分 → Lv.${info.level + 1}（${info.nextBase} 分）</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">⚡ 行为积分规则</h3>
+      <ul class="exp-rules">
+        ${rules.map(([k, v]) => `<li><span class="exp-rule-key">${k}</span><span class="exp-rule-val">${escapeHtml(v)}</span></li>`).join('')}
+      </ul>
+      <p class="hint">积分只增不减（删除帖子/评论不会扣分）。浏览积分每日 0 点（UTC）重置计数。</p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">🏆 等级积分表</h3>
+      <table class="exp-table">
+        <thead><tr><th>等级</th><th>所需积分</th><th>下一级</th><th></th></tr></thead>
+        <tbody>${levelRows.join('')}</tbody>
+      </table>
+      <p class="hint">超过 Lv.10 后每级 +${api.LEVEL_STEP_BEYOND} 积分递增。</p>
+    </div>
+
+    <div class="toolbar">
+      <button class="secondary" onclick="location.hash='forum'">去广场发帖赚积分 →</button>
+      <button class="ghost" onclick="location.hash='me'">返回我的</button>
+    </div>
+  `;
+
+  // 绑定签到日历下拉框 + 今天按钮
+  const ySel = document.getElementById('ckinYearSel');
+  const mSel = document.getElementById('ckinMonthSel');
+  const todayBtn = document.getElementById('ckinTodayBtn');
+  if (ySel) ySel.onchange = () => { _checkinYear = parseInt(ySel.value, 10); renderCheckinCalendarOnly(_checkinYear, _checkinMonth); };
+  if (mSel) mSel.onchange = () => { _checkinMonth = parseInt(mSel.value, 10); renderCheckinCalendarOnly(_checkinYear, _checkinMonth); };
+  if (todayBtn) todayBtn.onclick = () => {
+    const n = new Date();
+    _checkinYear = n.getUTCFullYear(); _checkinMonth = n.getUTCMonth() + 1;
+    ySel.value = _checkinYear; mSel.value = _checkinMonth;
+    renderCheckinCalendarOnly(_checkinYear, _checkinMonth);
+  };
+}
+
+// ==================== 签到动作（积分页内按钮 + 日历切换）====================
+// 当前查看的签到日历年月（模块级，跨 renderExp 保持）
+let _checkinYear = 0;
+let _checkinMonth = 0;
+
+window.doCheckinAction = async function () {
+  const btn = document.getElementById('doCheckinBtn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true; btn.textContent = '签到中...';
+  let r;
+  try { r = await api.checkin.do(); } catch (e) { btn.disabled = false; btn.textContent = '签到失败，重试'; return; }
+  if (!r || !r.success) {
+    btn.disabled = false; btn.textContent = r && r.message ? r.message : '签到失败，重试';
+    return;
+  }
+  const d = r.data;
+  const bonusText = d.isBonusDay ? `（🎁 连续 ${d.streak} 天额外奖励 +${api.EXP.CHECKIN_STREAK_BONUS}）` : '';
+  alert(`✅ 签到成功！获得 ${d.gained} 积分${bonusText}，连续签到 ${d.streak} 天。`);
+  refreshNotificationBadge();
+
+  // DOM 局部更新：按钮 → 已签到；运势 → 显示；连续天数刷新
+  btn.disabled = true; btn.textContent = '✅ 今日已签到';
+  // 更新连续天数
+  const streakEl = document.querySelector('.checkin-streak b');
+  if (streakEl) streakEl.textContent = d.streak;
+  // 更新/插入运势
+  const fortuneEl = document.getElementById('checkinFortune');
+  const fortuneHtml = `<div class="checkin-fortune" id="checkinFortune" style="color:${d.fortuneColor || '#2563eb'}">
+    <span class="checkin-fortune-emoji">${d.fortuneEmoji || '🎭'}</span>
+    <span class="checkin-fortune-text">今日运势：<b>${d.fortune}</b></span>
+  </div>`;
+  if (fortuneEl) {
+    fortuneEl.outerHTML = fortuneHtml;
+  } else {
+    const card = document.querySelector('.checkin-card');
+    if (card) {
+      const top = card.querySelector('.checkin-top');
+      if (top) top.insertAdjacentHTML('afterend', fortuneHtml);
+      else card.insertAdjacentHTML('beforeend', fortuneHtml);
+    }
+  }
+  // 刷新日历网格（因为今天格子应该变成 checked）
+  await renderCheckinCalendarOnly(_checkinYear || new Date().getUTCFullYear(), _checkinMonth || new Date().getUTCMonth() + 1);
+};
+
+window.shiftCheckinMonth = async function (delta) {
+  const now = new Date();
+  let y = _checkinYear || now.getUTCFullYear();
+  let m = _checkinMonth || now.getUTCMonth() + 1;
+  m += delta;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  _checkinYear = y; _checkinMonth = m;
+  // 同步下拉框（如果存在）
+  const ySel = document.getElementById('ckinYearSel');
+  const mSel = document.getElementById('ckinMonthSel');
+  if (ySel && [...ySel.options].some(o => +o.value === y)) ySel.value = y;
+  if (mSel) mSel.value = m;
+  await renderCheckinCalendarOnly(y, m);
+};
+
+// 仅刷新签到日历网格（不重渲整个积分页）
+async function renderCheckinCalendarOnly(year, month) {
+  const grid = document.getElementById('ckinGrid');
+  if (!grid) return;
+  try {
+    const r = await api.checkin.calendar(year, month);
+    if (!r || !r.success) return;
+    const d = r.data;
+    const firstDay = new Date(d.year, d.month - 1, 1);
+    const startWeekday = (firstDay.getUTCDay() + 6) % 7; // 周一=0
+    const daysInMonth = new Date(d.year, d.month, 0).getUTCDate();
+    const checkedSet = new Set((d.checkedDates || []).map(x => x.date));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const cells = [];
+    for (let i = 0; i < startWeekday; i++) cells.push(`<span class="ckin-cell empty"></span>`);
+    for (let dd = 1; dd <= daysInMonth; dd++) {
+      const ds = `${d.year}-${String(d.month).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+      const isChk = checkedSet.has(ds);
+      const isTd = ds === todayStr;
+      cells.push(`<span class="ckin-cell${isChk ? ' checked' : ''}${isTd ? ' today' : ''}">${dd}${isChk ? '<em>✓</em>' : ''}</span>`);
+    }
+    while (cells.length < 42) cells.push(`<span class="ckin-cell empty"></span>`);
+    grid.innerHTML = cells.join('');
+  } catch {}
+}
+
+async function renderNotifications(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  const host = app;
+  host.innerHTML = `
+    <div class="toolbar">
+      <h3 style="margin:0">🔔 系统消息</h3>
+      <button class="secondary" id="notifMarkAllBtn" onclick="markAllNotificationsRead()">全部标为已读</button>
+    </div>
+    <div class="card"><div id="notifList" class="empty">🔄 加载中...</div></div>
+    <div id="notifPager" style="margin-top:10px;display:flex;gap:8px;justify-content:center"></div>
+  `;
+  window._notifPage = 1;
+  loadNotifications(1);
+}
+
+async function loadNotifications(page) {
+  window._notifPage = page;
+  const listEl = document.getElementById('notifList');
+  const pagerEl = document.getElementById('notifPager');
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  let r;
+  try {
+    r = await api.notifications.list(page, 20);
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty">❌ 加载失败：${escapeHtml(e && e.message || '未知错误')}</div>`;
+    return;
+  }
+  if (!r || !r.success) {
+    listEl.innerHTML = `<div class="empty">❌ ${escapeHtml((r && r.message) || '加载失败')}</div>`;
+    return;
+  }
+  const items = r.data || [];
+  const pg = r.pagination || {};
+  if (!items.length) {
+    listEl.innerHTML = `<div class="empty">📭 暂无系统消息。<br>发帖、评论、被点赞、被回复时会在这里收到积分变动通知。</div>`;
+    if (pagerEl) pagerEl.innerHTML = '';
+    return;
+  }
+  listEl.innerHTML = items.map(n => `
+    <div class="notif-item${n.isRead ? '' : ' notif-unread'}" onclick="markNotificationRead(${n.id})">
+      <div class="notif-icon">${notifIcon(n.type)}</div>
+      <div class="notif-body">
+        <div class="notif-content">${escapeHtml(n.content)}</div>
+        <div class="notif-meta">${escapeHtml(n.createdAt)}${n.expDelta ? ` ｜ <b style="color:#f97316">+${n.expDelta}</b> 积分` : ''}</div>
+      </div>
+      ${n.isRead ? '' : '<span class="notif-dot" title="未读"></span>'}
+    </div>
+  `).join('');
+  // 分页
+  if (pagerEl) {
+    const totalPages = pg.totalPages || 1;
+    if (totalPages <= 1) {
+      pagerEl.innerHTML = '';
+    } else {
+      pagerEl.innerHTML = `
+        <button class="ghost" ${page <= 1 ? 'disabled' : ''} onclick="loadNotifications(${page - 1})">上一页</button>
+        <span style="line-height:32px;font-size:13px;color:#6b7280">第 ${page} / ${totalPages} 页</span>
+        <button class="ghost" ${page >= totalPages ? 'disabled' : ''} onclick="loadNotifications(${page + 1})">下一页</button>
+      `;
+    }
+  }
+}
+
+// 通知类型 → 图标
+function notifIcon(type) {
+  switch (type) {
+    case 'post':     return '📝';
+    case 'comment':  return '💬';
+    case 'liked':    return '❤️';
+    case 'replied': return '↩️';
+    default:         return '🔔';
+  }
+}
+
+window.loadNotifications = loadNotifications;
+window.markNotificationRead = async function (id) {
+  // 标记单条已读并局部更新样式（不重载整页）
+  try {
+    await api.notifications.markRead(id);
+  } catch {}
+  document.querySelectorAll('.notif-item').forEach(el => {
+    if (el.getAttribute('onclick') && el.getAttribute('onclick').includes(`markNotificationRead(${id})`)) {
+      el.classList.remove('notif-unread');
+      const dot = el.querySelector('.notif-dot');
+      if (dot) dot.remove();
+    }
+  });
+  refreshNotificationBadge();
+};
+window.markAllNotificationsRead = async function () {
+  try {
+    await api.notifications.markAllRead();
+  } catch {}
+  document.querySelectorAll('.notif-item').forEach(el => {
+    el.classList.remove('notif-unread');
+    const dot = el.querySelector('.notif-dot');
+    if (dot) dot.remove();
+  });
+  refreshNotificationBadge();
+};
+
+// 刷新顶栏铃铛红点（不动整页）
+async function refreshNotificationBadge() {
+  let count = 0;
+  try {
+    const r = await api.notifications.unreadCount();
+    if (r && r.success) count = r.data.count || 0;
+  } catch {}
+  document.querySelectorAll('.nav-bell').forEach(bell => {
+    const existing = bell.querySelector('.unread-badge');
+    if (count > 0) {
+      if (existing) existing.textContent = count;
+      else bell.insertAdjacentHTML('beforeend', `<span class="unread-badge">${count}</span>`);
+    } else if (existing) {
+      existing.remove();
+    }
+  });
+}
+window.refreshNotificationBadge = refreshNotificationBadge;
+
+async function renderMe(app) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  _pendingAvatarSrc = null;   // 重新进入「我的」时 KV 早已同步，回退到正式取图 URL
+  const me = api.getCurrentUser();
+
+  app.innerHTML = `
+    <div class="profile-header" id="meProfileHeader">
+      <div class="avatar-lg" id="meHeaderAvatar">${buildAvatarInner(me)}</div>
+      <div style="flex:1">
+        <div class="profile-name">${escapeHtml(me.nickname)}${roleBadgeInline(me.role)}</div>
+        <div class="profile-uid">UID：${escapeHtml(me.uid)}　角色：${escapeHtml(me.role || 'member')}</div>
+        ${me.bio ? `<div class="profile-bio">${escapeHtml(me.bio)}</div>` : ''}
+      </div>
+    </div>
+    <div class="toolbar">
+      <div class="tab-bar">
+        <button id="tabProfile" class="on" onclick="switchMeTab('profile')">✏️ 资料</button>
+        <button id="tabMine" onclick="switchMeTab('mine')">📝 我发的帖</button>
+        <button id="tabLikes" onclick="switchMeTab('likes')">♥ 点赞过</button>
+        <button id="tabFavorites" onclick="switchMeTab('favorites')">★ 我的收藏</button>
+        <button id="tabPassword" onclick="switchMeTab('password')">🔐 修改密码</button>
+      </div>
+      <button class="secondary" onclick="location.hash='post'">+ 发新帖</button>
+    </div>
+    <div id="meContent"><div class="empty">🔄 加载中...</div></div>
+  `;
+  window._currentMeTab = 'profile';
+  loadMeTab('profile');
+}
+
+window.switchMeTab = function switchMeTab(tab) {
+  // 5 个 tab：profile / mine / likes / favorites / password
+  const tabIdMap = { profile: 'tabProfile', mine: 'tabMine', likes: 'tabLikes', favorites: 'tabFavorites', password: 'tabPassword' };
+  Object.keys(tabIdMap).forEach(t => {
+    const el = document.getElementById(tabIdMap[t]);
+    if (el) el.classList.toggle('on', t === tab);
+  });
+  window._currentMeTab = tab;
+  loadMeTab(tab);
+};
+async function loadMeTab(tab) {
+  const host = document.getElementById('meContent');
+  if (!host) return;
+
+  // --- 编辑资料：头像（上传/外链）+ 昵称 + 简介 ---
+  if (tab === 'profile') {
+    const me = api.getCurrentUser() || {};
+    host.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">✏️ 编辑个人资料</h3>
+        <div class="profile-edit-row">
+          <div class="avatar-lg" id="editAvatarPreview">${buildAvatarInner(me)}</div>
+          <div class="profile-edit-avatar-actions">
+            <label class="secondary" for="avatarFile">📷 从设备上传</label>
+            <input id="avatarFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="onAvatarFilePicked(this)">
+            <button class="ghost" onclick="clearAvatar()">移除头像</button>
+            <span class="hint">上传图片需 R2 已启用（≤2MB）；或下面填外链链接</span>
+          </div>
+        </div>
+        <input id="avatarUrlInput" placeholder="或填图片外链链接 https://... （留空 = 不修改头像）">
+        <label class="field-label" for="nicknameInput">昵称 <span class="hint">1-20 字</span></label>
+        <input id="nicknameInput" value="${escapeHtml(me.nickname || '')}" maxlength="20">
+        <label class="field-label" for="bioInput">自我简介 <span class="hint">最多 200 字</span></label>
+        <textarea id="bioInput" rows="3" maxlength="200" placeholder="一句话介绍自己（选填）">${escapeHtml(me.bio || '')}</textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <button id="saveProfileBtn" onclick="doSaveProfile()">保存资料</button>
+          <span class="hint" id="profileMsg"></span>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // --- 修改密码：独立表单 ---
+  if (tab === 'password') {
+    host.innerHTML = `
+      <div class="card">
+        <h3 style="margin-top:0">🔐 修改登录密码</h3>
+        <p class="hint" style="margin-top:-4px">
+          修改成功后会立即退出登录，需要用 <b>新密码</b> 重新登录（强制保证 localStorage 中的 token 不会"偷偷"继续用旧密码对应的身份）。
+        </p>
+        <input type="password" id="oldPwdInput" placeholder="当前旧密码（必填）" autocomplete="current-password">
+        <input type="password" id="newPwdInput" placeholder="新密码（6 位以上）" autocomplete="new-password">
+        <input type="password" id="confirmPwdInput" placeholder="再次输入新密码（必须一致）" autocomplete="new-password">
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+          <button id="changePwdBtn" onclick="doChangePwd()">确认修改密码</button>
+          <span class="hint">💡 建议：字母 + 数字组合，至少 8 位，不要跟其他网站共用密码</span>
+        </div>
+        <p id="pwdMsg" class="hint" style="margin-top:10px"></p>
+      </div>
+    `;
+    document.getElementById('confirmPwdInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doChangePwd();
+    });
+    return;
+  }
+
+  // --- 其它 3 个 tab：帖子列表 ---
+  host.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  try {
+    let res;
+    if (tab === 'mine') res = await api.posts.mine();
+    else if (tab === 'likes') res = await api.likes.mine();
+    else res = await api.favorites.mine();
+
+    if (!res.success) {
+      host.innerHTML = `<div class="card">❌ 加载失败：${escapeHtml(res.message)}</div>`;
+      return;
+    }
+    const data = res.data || [];
+    if (data.length === 0) {
+      const labels = { mine: '你还没发过帖子，去首页点「发新帖」开始吧！', likes: '还没给任何帖子点过赞～', favorites: '还没收藏过任何帖子～' };
+      host.innerHTML = `<div class="empty">${labels[tab] || '暂无'}</div>`;
+      return;
+    }
+    host.innerHTML = data.map(p => postCard(p, { allowClick: true })).join('');
+  } catch (e) {
+    host.innerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
+  }
+}
+window.doChangePwd = async function doChangePwd() {
+  const btn = document.getElementById('changePwdBtn');
+  const msg = document.getElementById('pwdMsg');
+  const oldPw = document.getElementById('oldPwdInput').value;
+  const newPw = document.getElementById('newPwdInput').value;
+  const confirmPw = document.getElementById('confirmPwdInput').value;
+  if (!btn || !msg) return;
+  btn.disabled = true; btn.textContent = '提交中...';
+  msg.textContent = '';
+  msg.style.color = '';
+  try {
+    const r = await api.auth.changePwd({ oldPassword: oldPw, newPassword: newPw, confirmPassword: confirmPw });
+    if (r.success) {
+      msg.style.color = '#059669';
+      msg.textContent = '✅ 修改成功！为了安全，1 秒后会自动退出登录，请用新密码重新登录～';
+      setTimeout(() => {
+        api.auth.logout();
+        renderTopBar();
+        location.hash = 'login';
+      }, 1100);
+    } else {
+      msg.style.color = '#dc2626';
+      msg.textContent = '❌ ' + (r.message || '修改失败');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '确认修改密码'; }
+  }
+};
+
+// ==================== 个人资料：头像上传 / 移除 / 保存 ====================
+window.onAvatarFilePicked = async function onAvatarFilePicked(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const msg = document.getElementById('profileMsg');
+  const setMsg = (t, color) => { if (msg) { msg.textContent = t; msg.style.color = color || ''; } };
+  // 先用本地 object URL 立即预览，不等 KV 全球同步
+  let localUrl = '';
+  try { localUrl = URL.createObjectURL(file); } catch {}
+  if (localUrl) setAvatarPreviewsSrc(localUrl);
+  setMsg('上传中...', '');
+  const r = await api.auth.uploadAvatar(file);
+  if (r.success) {
+    setMsg('✅ 头像已更新', '#059669');
+    // 记住本地预览，后续保存资料/刷新不会用未同步的 KV URL 覆盖
+    _pendingAvatarSrc = localUrl || null;
+  } else {
+    setMsg('❌ ' + (r.message || '上传失败'), '#dc2626');
+    // 失败：回退到之前的正式头像（userCache 仍是旧值）
+    _pendingAvatarSrc = null;
+    refreshMyProfileDisplay();
+    if (localUrl) { try { URL.revokeObjectURL(localUrl); } catch {} }
+  }
+  input.value = '';   // 允许重复选同一文件触发 onchange
+};
+
+window.clearAvatar = async function clearAvatar() {
+  const msg = document.getElementById('profileMsg');
+  const setMsg = (t, color) => { if (msg) { msg.textContent = t; msg.style.color = color || ''; } };
+  if (!confirm('确定移除当前头像？将恢复为昵称首字母占位。')) return;
+  setMsg('处理中...', '');
+  const r = await api.auth.updateProfile({ avatarUrl: '' });   // 空串 = 清空头像
+  if (r.success) {
+    setMsg('✅ 已移除头像', '#059669');
+    if (_pendingAvatarSrc) { try { URL.revokeObjectURL(_pendingAvatarSrc); } catch {} }
+    _pendingAvatarSrc = null;
+    refreshMyProfileDisplay();
+  } else {
+    setMsg('❌ ' + (r.message || '移除失败'), '#dc2626');
+  }
+};
+
+window.doSaveProfile = async function doSaveProfile() {
+  const btn = document.getElementById('saveProfileBtn');
+  const msg = document.getElementById('profileMsg');
+  if (!btn || !msg) return;
+  const nickname = (document.getElementById('nicknameInput').value || '').trim();
+  const bio = (document.getElementById('bioInput').value || '');
+  const urlVal = (document.getElementById('avatarUrlInput').value || '').trim();
+  if (!nickname) { msg.style.color = '#dc2626'; msg.textContent = '❌ 昵称不能为空'; return; }
+  if (nickname.length > 20) { msg.style.color = '#dc2626'; msg.textContent = '❌ 昵称最多 20 字'; return; }
+  if (bio.length > 200) { msg.style.color = '#dc2626'; msg.textContent = '❌ 简介最多 200 字'; return; }
+  if (urlVal && !/^https?:\/\//i.test(urlVal)) { msg.style.color = '#dc2626'; msg.textContent = '❌ 头像链接必须是 http(s) 网址'; return; }
+
+  btn.disabled = true; btn.textContent = '保存中...';
+  msg.textContent = ''; msg.style.color = '';
+  try {
+    // 头像外链留空则不传 → 不会覆盖已上传的 KV 头像
+    const body = { nickname, bio };
+    if (urlVal) body.avatarUrl = urlVal;
+    const r = await api.auth.updateProfile(body);
+    if (r.success) {
+      msg.style.color = '#059669';
+      msg.textContent = '✅ 资料已保存';
+      const urlInput = document.getElementById('avatarUrlInput');
+      if (urlInput) urlInput.value = '';   // 已生效，清空避免重复保存又覆盖
+      if (urlVal) {
+        // 头像换成了外链 → 本地上传预览 blob 作废
+        if (_pendingAvatarSrc) { try { URL.revokeObjectURL(_pendingAvatarSrc); } catch {} }
+        _pendingAvatarSrc = null;
+      }
+      refreshMyProfileDisplay();
+    } else {
+      msg.style.color = '#dc2626';
+      msg.textContent = '❌ ' + (r.message || '保存失败');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '保存资料'; }
+  }
+};
+
+// ==================== 视图：私信（会话列表 + 对话窗） ====================
+async function renderMessages(app, autoPeerUid, autoPeerName) {
+  if (!api.isLoggedIn()) { location.hash = 'login'; return; }
+  app.innerHTML = `
+    <div class="messages-layout">
+      <div class="conv-list">
+        <div class="new-dm-row">
+          <input id="newDmUid" placeholder="输入对方 8 位 UID 发起对话" maxlength="8" inputmode="numeric">
+          <button class="ghost" onclick="startNewConversation()">开始</button>
+        </div>
+        <div id="convList">🔄 读取会话...</div>
+      </div>
+      <div class="msg-pane" id="msgPane">
+        <h3 id="msgTitle">请选择会话开始聊天</h3>
+        <div class="msg-list" id="msgList"><div style="color:#86868b;text-align:center;padding:40px">👈 在左边选择一个会话，或发起新对话</div></div>
+        <div class="msg-input" id="msgInputWrap" style="display:none">
+          <textarea id="msgInput" placeholder="按 Cmd/Ctrl + Enter 发送，Enter 换行" onkeydown="msgBoxKeyDown(event)"></textarea>
+          <button onclick="sendCurrentMsg()">发送</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 如果是从用户主页带参进来的，自动填充并打开对话
+  if (autoPeerUid) {
+    const newDmInput = document.getElementById('newDmUid');
+    if (newDmInput) newDmInput.value = autoPeerUid;
+    // 等会话列表加载完再打开
+    setTimeout(() => {
+      openConversation(autoPeerUid);
+    }, 300);
+  }
+
+  // 拉会话列表
+  try {
+    const r = await api.messages.conversations();
+    const host = document.getElementById('convList');
+    if (!r.success) { host.innerHTML = `<div style="padding:12px;color:#ff3b30">❌ ${escapeHtml(r.message)}</div>`; return; }
+    let list = r.data || [];
+
+    // 把当前用户 UID 做成对象，方便构建会话项（含头像/等级/昵称/公会）
+    const me = api.getCurrentUser();
+
+    // ---------- 固定置顶：运维管理员（UID 00000001）----------
+    // 如果当前有真的和运维的对话，把它取出来当 pinned；否则合成一个 pinned 占位项
+    const ADMIN_UID = '00000001';
+    let pinnedAdmin = null;
+    const restList = [];
+    for (const c of list) {
+      if (c.otherUid === ADMIN_UID) pinnedAdmin = c;
+      else restList.push(c);
+    }
+    list = restList;
+
+    // 只有当我不是运维管理员时才显示运维管理员置顶
+    if (me && me.uid !== ADMIN_UID) {
+      if (!pinnedAdmin) {
+        // 没聊过，合成一个占位项：用 api.users.getProfile 查一下管理员的昵称和资料
+        try {
+          const pr = await api.users.getProfile(ADMIN_UID);
+          if (pr && pr.success && pr.data) {
+            pinnedAdmin = {
+              otherUid: ADMIN_UID,
+              otherNickname: pr.data.nickname || '运维管理员',
+              otherRole: pr.data.role || 'ops_admin',
+              otherAvatarUrl: pr.data.avatarUrl || null,
+              otherExpPoints: Number(pr.data.expPoints || 0),
+              otherGuildId: pr.data.guildId || null,
+              otherGuildName: pr.data.guildName || null,
+              otherGuildIcon: pr.data.guildIcon || null,
+              lastMessage: null,
+              unreadCount: 0,
+              _isAdminPinned: true,
+            };
+          } else {
+            pinnedAdmin = {
+              otherUid: ADMIN_UID,
+              otherNickname: '运维管理员',
+              otherRole: 'ops_admin',
+              otherAvatarUrl: null,
+              otherExpPoints: 0,
+              otherGuildId: null,
+              otherGuildName: null,
+              otherGuildIcon: null,
+              lastMessage: null,
+              unreadCount: 0,
+              _isAdminPinned: true,
+            };
+          }
+        } catch {
+          pinnedAdmin = {
+            otherUid: ADMIN_UID, otherNickname: '运维管理员', otherRole: 'ops_admin',
+            otherAvatarUrl: null, otherExpPoints: 0, otherGuildId: null, otherGuildName: null, otherGuildIcon: null,
+            lastMessage: null, unreadCount: 0, _isAdminPinned: true,
+          };
+        }
+      }
+    }
+
+    // 渲染单个会话项：左边头像，右边 昵称+公会+LV / 最后消息预览，右上角未读红点
+    function buildConvItem(c, isPinned) {
+      const last = c.lastMessage ? c.lastMessage.content : (isPinned ? '📮 点击联系官方运维管理员' : '（暂无消息）');
+      const badge = c.unreadCount ? `<span class="unread-badge">${c.unreadCount}</span>` : '';
+      const pinnedTag = isPinned ? `<span class="pinned-badge">📌</span>` : '';
+      const authorObj = {
+        avatarUrl: c.otherAvatarUrl, nickname: c.otherNickname,
+        expPoints: c.otherExpPoints || 0,
+        guildId: c.otherGuildId, guildName: c.otherGuildName, guildIcon: c.otherGuildIcon,
+        authorExpPoints: c.otherExpPoints || 0,
+        authorGuildId: c.otherGuildId, authorGuildName: c.otherGuildName, authorGuildIcon: c.otherGuildIcon,
+      };
+      // 项目内没有 levelBadge 函数，统一用 api.getLevelInfo 内联生成等级徽章（同帖子卡片的写法）
+      const lvlInfo = api.getLevelInfo(c.otherExpPoints || 0, c.otherRole);
+      const levelHtml = `<span class="level-badge${lvlInfo.isAdmin ? ' admin' : ''}" style="font-size:10px;padding:1px 5px">Lv.${lvlInfo.level}</span>`;
+      return `<div class="conv-item ${isPinned ? 'conv-pinned' : ''}" onclick="openConversation('${escapeHtml(c.otherUid)}')" data-uid="${escapeHtml(c.otherUid)}">
+        <span class="avatar-sm" style="flex-shrink:0">${buildAvatarInner(authorObj)}</span>
+        <div style="min-width:0;flex:1">
+          <div class="conv-name" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+            ${pinnedTag}
+            <span style="flex-shrink:0">${escapeHtml(c.otherNickname)}</span>
+            ${levelHtml}
+            ${guildBadge(authorObj)}
+            ${roleBadgeInline(c.otherRole)}
+            ${badge}
+          </div>
+          <div class="conv-preview">${escapeHtml(last.slice(0, 24))}</div>
+        </div>
+      </div>`;
+    }
+
+    const parts = [];
+    if (pinnedAdmin) parts.push(buildConvItem(pinnedAdmin, true));
+    if (list.length === 0 && !pinnedAdmin) {
+      host.innerHTML = `<div class="empty" style="padding:30px">还没有任何对话<br>在上方输入对方 UID 即可发起</div>`;
+      return;
+    }
+    parts.push(...list.map(c => buildConvItem(c, false)));
+    host.innerHTML = parts.join('');
+  } catch (e) {
+    document.getElementById('convList').innerHTML = `<div style="padding:12px;color:#ff3b30">❌ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+window.startNewConversation = function startNewConversation() {
+  const uid = (document.getElementById('newDmUid').value || '').trim();
+  if (!/^\d{8}$/.test(uid)) { alert('请输入 8 位数字 UID'); return; }
+  if (api.isLoggedIn() && uid === api.getCurrentUser().uid) { alert('不能和自己对话'); return; }
+  openConversation(uid);
+};
+function highlightConvItem(otherUid) {
+  document.querySelectorAll('.conv-item').forEach(it => {
+    it.classList.toggle('on', it.dataset.uid === otherUid);
+  });
+}
+window.openConversation = async function openConversation(otherUid) {
+  window._currentConvOther = otherUid;
+  highlightConvItem(otherUid);
+  const titleEl = document.getElementById('msgTitle');
+  titleEl.textContent = `与 ${otherUid} 的对话`;
+  document.getElementById('msgInputWrap').style.display = 'flex';
+  const listEl = document.getElementById('msgList');
+  listEl.innerHTML = `<div style="color:#86868b;text-align:center;padding:40px">🔄 加载聊天记录...</div>`;
+  const r = await api.messages.withUser(otherUid);
+  if (!r.success) { listEl.innerHTML = `<div style="padding:20px;color:#ff3b30">❌ ${escapeHtml(r.message)}</div>`; return; }
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+  const list = r.data || [];
+  if (list.length === 0) {
+    listEl.innerHTML = `<div style="color:#86868b;text-align:center;padding:40px">还没有任何消息，发第一条吧！</div>`;
+    return;
+  }
+  listEl.innerHTML = list.map(m => {
+    const mine = m.fromUid === me.uid;
+    return `<div class="msg-bubble ${mine ? 'mine' : 'theirs'}">
+      ${escapeHtml(m.content)}
+      <div class="msg-meta">${escapeHtml(formatTime(m.createdAt))}${mine && m.isRead ? ' · 已读' : ''}</div>
+    </div>`;
+  }).join('');
+  listEl.scrollTop = listEl.scrollHeight;
+};
+window.msgBoxKeyDown = function msgBoxKeyDown(e) {
+  // Cmd (macOS) 或 Ctrl (Windows/Linux) + Enter → 发送；单独 Enter → 正常换行
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendCurrentMsg(); }
+};
+window.sendCurrentMsg = async function sendCurrentMsg() {
+  const other = window._currentConvOther;
+  if (!other) return;
+  const ta = document.getElementById('msgInput');
+  const content = (ta.value || '').trim();
+  if (!content) return;
+  ta.value = '';
+  const r = await api.messages.send(other, content);
+  if (!r.success) { alert(r.message); return; }
+  // 重新拉对话（或直接 append）
+  openConversation(other);
+};
+
+// ==================== 视图：公告历史（公开，无需登录） ====================
+async function renderAnnouncements(app) {
+  app.innerHTML = `
+    <div class="toolbar">
+      <span style="font-size:16px;font-weight:600">📢 全站公告</span>
+    </div>
+    <div id="annList"><div class="empty">🔄 加载中...</div></div>
+  `;
+  try {
+    const r = await api.announcements.list(1, 50);
+    const host = document.getElementById('annList');
+    if (!r.success) { host.innerHTML = `<div class="card">❌ ${escapeHtml(r.message)}</div>`; return; }
+    const list = r.data || [];
+    if (list.length === 0) {
+      host.innerHTML = `<div class="empty">暂时没有公告</div>`;
+      return;
+    }
+    host.innerHTML = list.map(a => `
+      <div class="card">
+        <div class="meta">
+          ${a.isPinned ? '<span style="color:#f59e0b;background:#fef3c7;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">置顶</span>' : ''}
+          <span>by ${escapeHtml(a.authorNickname || '管理员')}</span>
+          <span>·</span>
+          <span>${escapeHtml(formatTime(a.createdAt))}</span>
+        </div>
+        <h3>${escapeHtml(a.title)}</h3>
+        <p style="white-space:pre-wrap">${escapeHtml(a.content)}</p>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('annList').innerHTML = `<div class="card">❌ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// ==================== 视图：管理员面板 ====================
+// 置顶帖顺序调整的本地状态
+let _adminPinPosts = [];   // 后端返回的置顶帖完整数据
+let _adminPinOrder = [];   // 当前顺序：帖子 id 数组（操作后可能偏离服务端顺序，点保存才落库）
+
+async function renderAdmin(app) {
+  const me = api.getCurrentUser();
+  if (!api.isLoggedIn() || (me && me.role !== 'ops_admin')) {
+    app.innerHTML = `<div class="card">⛔ 仅运维管理员可访问该面板。<br><a href="#login">去登录</a> 或 <a href="#forum">返回广场</a></div>`;
+    return;
+  }
+
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#dc2626">🛡 运维管理员面板</span></div>
+
+    <!-- 板块0：待审批申请（管理员提交的删帖/删评/封禁用户/封禁公会 申请） -->
+    <div class="card" style="border:2px solid #f59e0b22">
+      <h3 style="margin-top:0;color:#b45309">📝 待审批申请（管理员提交）</h3>
+      <p class="hint">这里展示协助管理员提交的「删除 / 封禁」申请，通过后将立即执行对应动作。</p>
+      <div id="adminPendingRequests">🔄 加载中...</div>
+      <div style="margin-top:10px">
+        <details><summary style="cursor:pointer;color:#6b7280;font-size:13px">展开查看历史申请（已执行 / 已拒绝）</summary>
+          <div id="adminHistoryRequests" style="margin-top:8px">🔄 加载中...</div>
+        </details>
+      </div>
+    </div>
+
+    <!-- 板块1：已注册账号（按 UID 分组） -->
+    <div class="card">
+      <h3 style="margin-top:0">👤 已注册账号</h3>
+      <div id="adminUsers">🔄 加载中...</div>
+    </div>
+
+    <!-- 板块2：分区与标签 -->
+    <div class="card">
+      <h3 style="margin-top:0">📂 分区与标签</h3>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:6px">分区（系统枚举，meta 仅管理员可发帖）：</div>
+      <div id="adminCats"></div>
+      <div style="font-size:12px;color:#6b7280;margin:12px 0 6px">全量标签（按出现次数降序）：</div>
+      <div id="adminTags">🔄 加载标签中...</div>
+    </div>
+
+    <!-- 板块3：置顶帖顺序调整 -->
+    <div class="card">
+      <h3 style="margin-top:0">📌 置顶帖顺序调整</h3>
+      <p class="hint">多个置顶帖按下方顺序排列，越靠前越优先显示在列表顶部。用 ↑↓ 调整顺序后点「保存顺序」生效。</p>
+      <div id="adminPinned">🔄 加载中...</div>
+    </div>
+
+    <!-- 板块3.5：带图片帖区（紧凑行布局，方便批量删除） -->
+    <div class="card">
+      <h3 style="margin-top:0">🖼 带图片帖区</h3>
+      <p class="hint">所有包含图片的帖子一行一行紧密排列，点击可查看详情，右侧按钮可直接删除。</p>
+      <div id="adminImagePosts">🔄 加载中...</div>
+    </div>
+
+    <!-- 板块4：其他帖子列表（非置顶，按时间倒序，点击可进详情） -->
+    <div class="card">
+      <h3 style="margin-top:0">📄 其他帖子</h3>
+      <p class="hint">除置顶帖外的全部帖子，按发布时间倒序列出。点击标题可跳转详情页编辑/管理。</p>
+      <div id="adminPosts">🔄 加载中...</div>
+    </div>
+
+    <!-- 板块5：公会管理 -->
+    <div class="card">
+      <h3 style="margin-top:0">🏰 公会管理</h3>
+      <p class="hint">查看所有公会，编辑/注销/封禁，管理成员，审批加入和创建申请。</p>
+      <div id="adminGuilds">
+        <div class="admin-guild-tabs">
+          <button data-tab="guilds" class="active" onclick="window._adminGuildTab='guilds';renderAdminGuildsContent()">📋 所有公会 <span id="agCount" style="opacity:.6"></span></button>
+          <button data-tab="members" onclick="window._adminGuildTab='members';renderAdminGuildsContent()">👥 成员管理</button>
+          <button data-tab="joinRequests" onclick="window._adminGuildTab='joinRequests';renderAdminGuildsContent()">📥 加入申请 <span id="agJrCount" style="opacity:.6"></span></button>
+          <button data-tab="createRequests" onclick="window._adminGuildTab='createRequests';renderAdminGuildsContent()">📝 建会申请 <span id="agCrCount" style="opacity:.6"></span></button>
+          <button onclick="adminGuildQuickCreate()">➕ 直接建公会</button>
+        </div>
+        <div id="adminGuildsContent">🔄 加载中...</div>
+      </div>
+    </div>
+  `;
+
+  // --- 板块1：账号列表（含最后登录时间 / 状态 / 注销·封禁操作）---
+  renderAdminUsers(document.getElementById('adminUsers'));
+
+  // --- 板块2：分区（静态枚举）+ 标签（异步全量）---
+  const catsHost = document.getElementById('adminCats');
+  catsHost.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">
+    ${CATEGORIES.map(c => `<span style="color:${c.cssColor};background:${toLightBg(c.cssColor)};padding:2px 10px;border-radius:12px;font-size:12px" title="${escapeHtml(c.description||'')}">${escapeHtml(c.label)}${c.adminOnly?' 🔒':''}</span>`).join('')}
+  </div>`;
+  (async () => {
+    const host = document.getElementById('adminTags');
+    try {
+      const r = await api.admin.allTags();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const tags = r.data || [];
+      if (tags.length === 0) { host.innerHTML = `<span class="hint">暂无标签</span>`; return; }
+      host.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${tags.map(t => `<span class="tag-chip">#${escapeHtml(t.tag)} <small style="opacity:.6">×${t.count}</small></span>`).join('')}
+      </div>`;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块3：置顶帖顺序 ---
+  (async () => {
+    try {
+      const r = await api.admin.pinnedPosts();
+      if (!r.success) { document.getElementById('adminPinned').innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      _adminPinPosts = r.data || [];
+      _adminPinOrder = _adminPinPosts.map(p => p.id);
+      renderAdminPinList();
+    } catch (e) { document.getElementById('adminPinned').innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块3.5：带图片帖区（紧凑行布局）---
+  (async () => {
+    const host = document.getElementById('adminImagePosts');
+    try {
+      const r = await api.admin.postsWithImages();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = r.data || [];
+      if (list.length === 0) { host.innerHTML = `<span class="hint">暂无带图片的帖子</span>`; return; }
+      host.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${list.length} 条带图片帖子</div>
+        ${list.map(p => {
+          const author = p.authorNickname || `用户${p.authorUid}`;
+          const firstImgUrl = p.firstImage ? api.images.getUrl(p.firstImage.id) : '';
+          const tagHtml = (Array.isArray(p.tags) && p.tags.length)
+            ? p.tags.slice(0, 3).map(t => `<span class="tag-chip" style="font-size:11px;padding:0 5px">#${escapeHtml(t)}</span>`).join('')
+            : '';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:4px">
+            ${firstImgUrl ? `<img src="${escapeHtml(firstImgUrl)}" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex-shrink:0" alt="缩略图">` : `<div style="width:44px;height:44px;background:#f3f4f6;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px">🖼</div>`}
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+              <div style="display:flex;align-items:center;gap:6px">
+                ${categoryBadgeHtml(p.category)}
+                <a href="#detail/${p.id}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none;font-size:14px;font-weight:500" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
+                ${p.imageCount > 1 ? `<span style="font-size:11px;color:#6b7280;background:#f3f4f6;padding:0 5px;border-radius:4px;flex-shrink:0">${p.imageCount}张</span>` : ''}
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#6b7280;overflow:hidden;flex-wrap:wrap">
+                <span style="flex-shrink:0">${escapeHtml(author)}</span>
+                ${guildBadge(p)}
+                <span style="flex-shrink:0">·</span>
+                <span style="flex-shrink:0">${escapeHtml(formatTime(p.createdAt))}</span>
+                <div style="display:flex;gap:3px;overflow:hidden">${tagHtml}</div>
+              </div>
+            </div>
+            <button data-del-post="${p.id}" style="flex-shrink:0;padding:4px 10px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;font-size:12px;cursor:pointer" title="删除此帖（连带图片）">🗑 删除</button>
+          </div>`;
+        }).join('')}`;
+      // 绑定删除按钮
+      host.querySelectorAll('[data-del-post]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const postId = parseInt(btn.getAttribute('data-del-post'), 10);
+          if (!confirm(`确定删除帖子 #${postId}？\n将连带删除该帖的全部图片、评论、点赞等数据，不可恢复！`)) return;
+          btn.disabled = true; btn.textContent = '删除中...';
+          try {
+            const res = await api.admin.deletePost(postId);
+            if (res.success) {
+              btn.closest('[data-del-post]')?.parentElement?.remove();
+              // 刷新计数
+              const remaining = host.querySelectorAll('[data-del-post]').length;
+              const countEl = host.querySelector('div[style*="margin-bottom:8px"]');
+              if (countEl) countEl.textContent = remaining > 0 ? `共 ${remaining} 条带图片帖子` : '暂无带图片的帖子';
+              if (remaining === 0) host.innerHTML = `<span class="hint">暂无带图片的帖子</span>`;
+            } else {
+              alert('删除失败：' + (res.message || '未知错误'));
+              btn.disabled = false; btn.textContent = '🗑 删除';
+            }
+          } catch (e) {
+            alert('删除出错：' + e.message);
+            btn.disabled = false; btn.textContent = '🗑 删除';
+          }
+        });
+      });
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块4：其他帖子（非置顶，只读列表）---
+  (async () => {
+    const host = document.getElementById('adminPosts');
+    try {
+      const r = await api.admin.listPosts();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = r.data || [];
+      if (list.length === 0) { host.innerHTML = `<span class="hint">暂无其他帖子</span>`; return; }
+      host.innerHTML = `<div style="font-size:12px;color:#6b7280;margin-bottom:8px">共 ${list.length} 条非置顶帖</div>
+        ${list.map(p => {
+          const author = p.authorNickname || `用户${p.authorUid}`;
+          const tagHtml = (Array.isArray(p.tags) && p.tags.length)
+            ? p.tags.map(t => `<span class="tag-chip" style="font-size:11px;padding:1px 6px">#${escapeHtml(t)}</span>`).join('')
+            : '';
+          return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px">
+            ${categoryBadgeHtml(p.category)}
+            <a href="#detail/${p.id}" style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
+            ${tagHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;flex-basis:100%;margin-top:2px">${tagHtml}</div>` : ''}
+            <span style="white-space:nowrap;color:#6b7280;font-size:12px;margin-left:auto;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${escapeHtml(author)}${guildBadge(p)} · ${escapeHtml(formatTime(p.createdAt))}</span>
+          </div>`;
+        }).join('')}`;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; }
+  })();
+
+  // --- 板块5：公会管理 ---
+  window._adminGuildTab = 'guilds';
+  renderAdminGuildsContent();
+
+  // --- 板块0：待审批 / 历史申请 ---
+  (async () => {
+    const host = document.getElementById('adminPendingRequests');
+    if (!host) return;
+    try {
+      const r = await api.adminRequests.pending();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = r.data || [];
+      if (!list.length) { host.innerHTML = `<div class="hint">✅ 当前没有待审批申请。</div>`; return; }
+      host.innerHTML = list.map(r => buildApprovalCard(r, { reload: () => renderAdmin(app) })).join('');
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message || e)}`; }
+  })();
+  (async () => {
+    const host = document.getElementById('adminHistoryRequests');
+    if (!host) return;
+    try {
+      const r = await api.adminRequests.history();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = (r.data || []).slice(0, 50);
+      if (!list.length) { host.innerHTML = `<div class="hint">暂无历史申请。</div>`; return; }
+      host.innerHTML = list.map(r => buildApprovalCard(r, { history: true })).join('');
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message || e)}`; }
+  })();
+}
+
+// 申请卡片（运维面板审批用 / 历史用）
+function buildApprovalCard(r, opts = {}) {
+  const typeLabelMap = { delete_post: '删帖', delete_comment: '删评', ban_user: '封禁用户', ban_guild: '封禁公会' };
+  const typeColorMap = { delete_post: '#2563eb', delete_comment: '#7c3aed', ban_user: '#dc2626', ban_guild: '#b45309' };
+  const statusColor = r.status === 'pending' ? '#b45309' : r.status === 'approved' ? '#166534' : '#b91c1c';
+  const statusText = r.status === 'pending' ? '待审批' : r.status === 'approved' ? '已执行' : '已拒绝';
+  const tl = typeLabelMap[r.type] || r.type;
+  const tc = typeColorMap[r.type] || '#6b7280';
+  const actionBar = opts.history
+    ? ''
+    : `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="appr-note-${r.id}" class="input" style="flex:1;min-width:180px;padding:4px 8px;font-size:13px" placeholder="审批备注（可选）" />
+        <button class="secondary" onclick="rejectAdminRequest(${r.id})" style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca">❌ 拒绝</button>
+        <button onclick="approveAdminRequest(${r.id})" style="background:#166534;color:#fff;border:1px solid #166534">✅ 通过并执行</button>
+      </div>`;
+  return `<div class="card" style="padding:10px;margin-bottom:8px;border-left:4px solid ${tc}">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+      <span style="font-size:11px;background:${tc}15;color:${tc};padding:2px 8px;border-radius:10px">${tl}</span>
+      <span style="font-size:11px;background:#fef3c7;color:${statusColor};padding:2px 8px;border-radius:10px">${statusText}</span>
+      <span style="font-size:12px;color:#6b7280;margin-left:auto">${escapeHtml(r.createdAt || '')}</span>
+    </div>
+    <div style="font-size:13px"><b>目标快照：</b>${escapeHtml(r.targetSnapshot || r.targetId)}</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:2px">目标编号：${escapeHtml(r.targetId)}｜申请人：${escapeHtml(r.requesterNickname || r.requesterUid)}｜申请编号：#${r.id}</div>
+    <div style="margin-top:6px;padding:6px 10px;background:#f9fafb;border-left:3px solid #6366f1;font-size:13px;border-radius:4px"><b>理由：</b>${escapeHtml(r.reason || '（无）')}</div>
+    ${r.reviewerNote ? `<div style="margin-top:6px;padding:6px 10px;background:#f3f4f6;border-left:3px solid #6b7280;font-size:13px;border-radius:4px"><b>审批备注：</b>${escapeHtml(r.reviewerNote)}${r.reviewedAt ? ` <span style="color:#9ca3af">（${r.reviewedAt}）</span>` : ''}</div>` : ''}
+    ${actionBar}
+  </div>`;
+}
+
+// 审批动作（挂 window 供内联调用）
+window.approveAdminRequest = async function (id) {
+  if (!confirm('确定通过该申请？通过后将立即执行相应动作（删除 / 封禁）。')) return;
+  const noteEl = document.getElementById(`appr-note-${id}`);
+  const note = noteEl ? (noteEl.value || '').trim().slice(0, 300) : '';
+  const r = await api.adminRequests.approve(id, note);
+  if (r && r.success) { alert('✅ 已通过并执行'); route(); }
+  else alert('❌ ' + ((r && r.message) || '操作失败'));
+};
+window.rejectAdminRequest = async function (id) {
+  const noteEl = document.getElementById(`appr-note-${id}`);
+  const note = noteEl ? (noteEl.value || '').trim().slice(0, 300) : (prompt('请输入拒绝理由（可选）：') || '');
+  const r = await api.adminRequests.reject(id, note || '');
+  if (r && r.success) { alert('已拒绝'); route(); }
+  else alert('❌ ' + ((r && r.message) || '操作失败'));
+};
+
+// ==================== 管理员：公会管理面板 ====================
+// 缓存（避免频繁请求）
+let _adminGuildsCache = null;          // 公会列表
+let _adminJoinRequestsCache = null;     // 加入申请
+let _adminCreateRequestsCache = null;   // 建会申请
+let _adminGuildDetailCache = {};        // { [guildId]: guildDetail }
+
+async function renderAdminGuildsContent() {
+  const host = document.getElementById('adminGuildsContent');
+  if (!host) return;
+
+  // Tab 按钮激活态
+  document.querySelectorAll('.admin-guild-tabs button[data-tab]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-tab') === window._adminGuildTab);
+  });
+
+  switch (window._adminGuildTab) {
+    case 'guilds':      return renderAdminGuildsList(host);
+    case 'members':     return renderAdminGuildsMembers(host);
+    case 'joinRequests': return renderAdminGuildsJoinRequests(host);
+    case 'createRequests': return renderAdminGuildsCreateRequests(host);
+  }
+}
+window.renderAdminGuildsContent = renderAdminGuildsContent;
+
+// ---- 所有公会 tab ----
+async function renderAdminGuildsList(host) {
+  host.innerHTML = '🔄 加载中...';
+  let list = _adminGuildsCache;
+  if (!list) {
+    try {
+      const r = await api.guilds.adminList();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      list = r.data || [];
+      _adminGuildsCache = list;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+  }
+  // 更新数量徽标
+  document.getElementById('agCount').textContent = list.length ? `(${list.length})` : '';
+
+  if (list.length === 0) {
+    host.innerHTML = `<div class="hint">暂无公会。点击右上「➕ 直接建公会」快速创建。</div>`;
+    return;
+  }
+
+  host.innerHTML = list.map(g => {
+    const isBanned = g.status === 'banned';
+    return `
+      <div class="admin-guild-row${isBanned ? ' ag-banned' : ''}" data-gid="${g.id}">
+        <div class="ag-icon">${escapeHtml(g.icon || '🏰')}</div>
+        <div class="ag-info">
+          <div class="ag-name">${escapeHtml(g.name)}</div>
+          <div class="ag-sub">ID: ${g.id} · 👥 ${g.memberCount || 0} 人${g.ownerNickname ? ` · 创始者: ${escapeHtml(g.ownerNickname)}` : ''}</div>
+          ${g.description ? `<div class="ag-sub" style="margin-top:2px">${escapeHtml(g.description)}</div>` : ''}
+        </div>
+        <span class="ag-status ${isBanned ? 's-banned' : 's-active'}">${isBanned ? '已封禁' : '正常'}</span>
+        <div class="ag-actions">
+          <button onclick="adminGuildEdit(${g.id})">✏️ 编辑</button>
+          <button onclick="window._adminGuildTab='members';window._adminGuildMembersSel=${g.id};renderAdminGuildsContent()">👥 成员</button>
+          ${isBanned
+            ? `<button class="warn" onclick="adminGuildUnban(${g.id})">🔓 解封</button>`
+            : `<button class="warn" onclick="adminGuildBan(${g.id})">🚫 封禁</button>`
+          }
+          <button class="danger" onclick="adminGuildDelete(${g.id}, '${escapeHtml(g.name)}')">🗑 注销</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ---- 成员管理 tab ----
+async function renderAdminGuildsMembers(host) {
+  if (!window._adminGuildMembersSel) {
+    // 默认选第一个公会
+    if (_adminGuildsCache && _adminGuildsCache.length > 0) {
+      window._adminGuildMembersSel = _adminGuildsCache[0].id;
+    } else {
+      // 先加载公会列表
+      try {
+        const r = await api.guilds.adminList();
+        if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+        _adminGuildsCache = r.data || [];
+        window._adminGuildMembersSel = _adminGuildsCache[0]?.id;
+      } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+    }
+  }
+
+  // 公会选择器
+  const guilds = _adminGuildsCache || [];
+  let selHtml = guilds.map(g =>
+    `<option value="${g.id}" ${g.id === window._adminGuildMembersSel ? 'selected' : ''}>${escapeHtml(g.icon || '🏰')} ${escapeHtml(g.name)} (${g.memberCount || 0}人)</option>`
+  ).join('');
+  if (!selHtml) { host.innerHTML = `<div class="hint">暂无公会，请先创建。</div>`; return; }
+
+  host.innerHTML = `
+    <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center">
+      <label style="font-size:12px;color:#6b7280">选择公会：</label>
+      <select id="agmSel" onchange="window._adminGuildMembersSel=parseInt(this.value);delete _adminGuildDetailCache[window._adminGuildMembersSel];renderAdminGuildsContent()" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px">
+        ${selHtml}
+      </select>
+      <button onclick="adminGuildAddMember()" style="font-size:12px;padding:4px 10px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px">➕ 添加成员</button>
+    </div>
+    <div id="agmDetail">🔄 加载成员...</div>
+  `;
+
+  // 加载详情
+  const gid = window._adminGuildMembersSel;
+  try {
+    let detail = _adminGuildDetailCache[gid];
+    if (!detail) {
+      const r = await api.guilds.detail(gid);
+      if (!r.success) { document.getElementById('agmDetail').innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      detail = r.data;
+      _adminGuildDetailCache[gid] = detail;
+    }
+    const members = detail.members || [];
+    const memberHtml = members.map(m => `
+      <div class="admin-guild-member-row">
+        <span class="agm-role role-${m.role}">${m.role === 'owner' ? '👑' : m.role === 'admin' ? '🛡' : ''}</span>
+        <span class="agm-name">${escapeHtml(m.nickname || `用户${m.uid}`)}</span>
+        <span class="agm-uid">${escapeHtml(m.uid)}</span>
+        <span style="font-size:11px;color:#9ca3af;margin-right:8px">${m.role}</span>
+        ${m.role !== 'owner'
+          ? `<button class="danger" onclick="adminGuildRemoveMember(${gid}, '${escapeHtml(m.uid)}', '${escapeHtml(m.nickname || m.uid)}')">踢出</button>`
+          : `<span style="font-size:11px;color:#9ca3af">创始者</span>`
+        }
+      </div>
+    `).join('') || `<div class="hint">该公会暂无成员</div>`;
+
+    document.getElementById('agmDetail').innerHTML = `
+      <div class="admin-guild-detail">
+        <h4>${escapeHtml(detail.icon || '🏰')} ${escapeHtml(detail.name)} · 共 ${members.length} 人</h4>
+        ${detail.status === 'banned' ? `<div style="color:#dc2626;font-size:12px;margin-bottom:8px">⚠️ 该公会已被封禁</div>` : ''}
+        ${memberHtml}
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById('agmDetail').innerHTML = `❌ ${escapeHtml(e.message)}`;
+  }
+}
+
+// ---- 加入申请 tab ----
+async function renderAdminGuildsJoinRequests(host) {
+  host.innerHTML = '🔄 加载中...';
+  let list = _adminJoinRequestsCache;
+  if (!list) {
+    try {
+      const r = await api.guilds.adminJoinRequests();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      list = r.data || [];
+      _adminJoinRequestsCache = list;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+  }
+  const pendingCount = list.filter(r => r.status === 'pending').length;
+  document.getElementById('agJrCount').textContent = pendingCount ? `(${pendingCount})` : '';
+
+  if (list.length === 0) {
+    host.innerHTML = `<div class="hint">暂无加入申请。</div>`; return;
+  }
+
+  const html = list.map(r => {
+    const isPending = r.status === 'pending';
+    return `
+      <div class="admin-request-row${isPending ? ' pending' : ''}" data-rid="${r.id}">
+        <div class="ar-info">
+          <div class="ar-title">📥 ${escapeHtml(r.applicantNickname || `用户${r.uid}`)} 申请加入 ${escapeHtml(r.guildName)}</div>
+          <div class="ar-sub">UID: ${escapeHtml(r.uid)} · 时间: ${escapeHtml(formatTime(r.createdAt))}${r.reason ? ` · 理由: ${escapeHtml(r.reason)}` : ''}</div>
+        </div>
+        <span class="ar-status ${r.status}">${r.status === 'pending' ? '待审批' : r.status === 'approved' ? '已通过' : '已拒绝'}</span>
+        <div class="ar-actions">
+          ${isPending
+            ? `<button class="approve" onclick="adminGuildReviewJoin(${r.id}, true)">通过</button>
+               <button class="reject" onclick="adminGuildReviewJoin(${r.id}, false)">拒绝</button>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  host.innerHTML = html;
+}
+
+// ---- 建会申请 tab ----
+async function renderAdminGuildsCreateRequests(host) {
+  host.innerHTML = '🔄 加载中...';
+  let list = _adminCreateRequestsCache;
+  if (!list) {
+    try {
+      const r = await api.guilds.adminCreateRequests();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      list = r.data || [];
+      _adminCreateRequestsCache = list;
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message)}`; return; }
+  }
+  const pendingCount = list.filter(r => r.status === 'pending').length;
+  document.getElementById('agCrCount').textContent = pendingCount ? `(${pendingCount})` : '';
+
+  if (list.length === 0) {
+    host.innerHTML = `<div class="hint">暂无建会申请。</div>`; return;
+  }
+
+  host.innerHTML = list.map(r => {
+    const isPending = r.status === 'pending';
+    return `
+      <div class="admin-request-row${isPending ? ' pending' : ''}" data-rid="${r.id}">
+        <div class="ar-info">
+          <div class="ar-title">📝 ${escapeHtml(r.applicantNickname || `用户${r.requesterUid}`)} 申请创建 ${escapeHtml(r.icon || '🏰')} <b>${escapeHtml(r.name)}</b></div>
+          <div class="ar-sub">UID: ${escapeHtml(r.requesterUid)} · 时间: ${escapeHtml(formatTime(r.createdAt))}${r.description ? ` · 简介: ${escapeHtml(r.description)}` : ''}${r.reason ? ` · 理由: ${escapeHtml(r.reason)}` : ''}</div>
+        </div>
+        <span class="ar-status ${r.status}">${r.status === 'pending' ? '待审批' : r.status === 'approved' ? '已通过' : '已拒绝'}</span>
+        <div class="ar-actions">
+          ${isPending
+            ? `<button class="approve" onclick="adminGuildReviewCreate(${r.id}, true)">通过（自动建会）</button>
+               <button class="reject" onclick="adminGuildReviewCreate(${r.id}, false)">拒绝</button>`
+            : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ==================== 管理员：公会操作 ====================
+
+// 编辑公会
+window.adminGuildEdit = async function adminGuildEdit(id) {
+  const g = (_adminGuildsCache || []).find(x => x.id === id);
+  if (!g) return;
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <h3 style="margin-top:0">✏️ 编辑公会</h3>
+      <label style="font-size:12px;color:#6b7280">图标（一个 emoji）</label>
+      <input id="ageIcon" value="${escapeHtml(g.icon || '🏰')}" maxlength="4" style="width:100%;font-size:20px;text-align:center;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">名称</label>
+      <input id="ageName" value="${escapeHtml(g.name)}" maxlength="30" style="width:100%;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">简介</label>
+      <textarea id="ageDesc" maxlength="300" rows="3" style="width:100%">${escapeHtml(g.description || '')}</textarea>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="secondary" onclick="this.closest('.modal-backdrop').remove()">取消</button>
+        <button id="ageSave">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelector('#ageSave').onclick = async () => {
+    const name = modal.querySelector('#ageName').value.trim();
+    if (!name) { alert('名称不能为空'); return; }
+    try {
+      const r = await api.guilds.adminEdit(id, {
+        name,
+        icon: modal.querySelector('#ageIcon').value.trim() || '🏰',
+        description: modal.querySelector('#ageDesc').value.trim(),
+      });
+      if (r.success) {
+        _adminGuildsCache = null;
+        delete _adminGuildDetailCache[id];
+        modal.remove();
+        renderAdminGuildsContent();
+      } else {
+        alert('保存失败：' + (r.message || ''));
+      }
+    } catch (e) { alert('出错：' + e.message); }
+  };
+};
+
+// 封禁 / 解封
+window.adminGuildBan = async function adminGuildBan(id) {
+  if (!confirm('确定封禁该公会？封禁后公会将对普通用户不可见。')) return;
+  try {
+    const r = await api.guilds.adminBan(id);
+    if (r.success) { _adminGuildsCache = null; renderAdminGuildsContent(); }
+    else alert('失败：' + (r.message || ''));
+  } catch (e) { alert('出错：' + e.message); }
+};
+window.adminGuildUnban = async function adminGuildUnban(id) {
+  try {
+    const r = await api.guilds.adminUnban(id);
+    if (r.success) { _adminGuildsCache = null; renderAdminGuildsContent(); }
+    else alert('失败：' + (r.message || ''));
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 注销公会
+window.adminGuildDelete = async function adminGuildDelete(id, name) {
+  if (!confirm(`⚠️ 确定注销公会 "${name}"？\n将同时删除所有成员、申请记录等关联数据，不可恢复！`)) return;
+  if (!confirm('请再确认一次：此操作不可撤销！')) return;
+  try {
+    const r = await api.guilds.adminDelete(id);
+    if (r.success) {
+      _adminGuildsCache = null;
+      delete _adminGuildDetailCache[id];
+      if (window._adminGuildMembersSel === id) window._adminGuildMembersSel = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 添加成员
+window.adminGuildAddMember = async function adminGuildAddMember() {
+  const gid = window._adminGuildMembersSel;
+  if (!gid) { alert('请先选择公会'); return; }
+  const uid = prompt('请输入要添加的用户 UID：');
+  if (!uid) return;
+  const role = (prompt('角色？(member/admin/owner) 输入留空默认为 member：', 'member') || 'member').trim();
+  try {
+    const r = await api.guilds.adminAddMember(gid, uid, role);
+    if (r.success) {
+      delete _adminGuildDetailCache[gid];
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('添加失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 移除成员
+window.adminGuildRemoveMember = async function adminGuildRemoveMember(gid, uid, nickname) {
+  if (!confirm(`确定从公会中踢出 ${nickname} (${uid})？`)) return;
+  try {
+    const r = await api.guilds.adminRemoveMember(gid, uid);
+    if (r.success) {
+      delete _adminGuildDetailCache[gid];
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('踢出失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 审批加入申请
+window.adminGuildReviewJoin = async function adminGuildReviewJoin(id, approve) {
+  try {
+    const fn = approve ? api.guilds.adminApproveJoin : api.guilds.adminRejectJoin;
+    const r = await fn(id);
+    if (r.success) {
+      _adminJoinRequestsCache = null;
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+    } else {
+      alert('操作失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 审批建会申请
+window.adminGuildReviewCreate = async function adminGuildReviewCreate(id, approve) {
+  if (approve && !confirm('通过后将自动创建公会并把申请人加入为创始者，确定？')) return;
+  try {
+    const fn = approve ? api.guilds.adminApproveCreate : api.guilds.adminRejectCreate;
+    const r = await fn(id);
+    if (r.success) {
+      _adminCreateRequestsCache = null;
+      _adminGuildsCache = null;
+      renderAdminGuildsContent();
+      if (approve && r.data && r.data.guildId) {
+        // 新公会详情缓存清空
+        delete _adminGuildDetailCache[r.data.guildId];
+      }
+    } else {
+      alert('操作失败：' + (r.message || ''));
+    }
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// 管理员直接创建公会
+window.adminGuildQuickCreate = async function adminGuildQuickCreate() {
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <h3 style="margin-top:0">➕ 直接创建公会</h3>
+      <label style="font-size:12px;color:#6b7280">图标（一个 emoji）</label>
+      <input id="qgcIcon" value="🏰" maxlength="4" style="width:100%;font-size:20px;text-align:center;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">名称（必填）</label>
+      <input id="qgcName" maxlength="30" placeholder="例如：学霸交流群" style="width:100%;margin-bottom:8px">
+      <label style="font-size:12px;color:#6b7280">简介</label>
+      <textarea id="qgcDesc" maxlength="300" rows="3" placeholder="可选" style="width:100%"></textarea>
+      <label style="font-size:12px;color:#6b7280">创始者 UID（可选，留空则不指定）</label>
+      <input id="qgcOwner" placeholder="例如：2612000001" style="width:100%;margin-bottom:8px">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="secondary" onclick="this.closest('.modal-backdrop').remove()">取消</button>
+        <button id="qgcSubmit">创建</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.querySelector('#qgcSubmit').onclick = async () => {
+    const name = modal.querySelector('#qgcName').value.trim();
+    if (!name) { alert('请填写公会名称'); return; }
+    try {
+      const r = await api.guilds.adminCreate({
+        name,
+        icon: modal.querySelector('#qgcIcon').value.trim() || '🏰',
+        description: modal.querySelector('#qgcDesc').value.trim() || null,
+        ownerUid: modal.querySelector('#qgcOwner').value.trim() || null,
+      });
+      if (r.success) {
+        _adminGuildsCache = null;
+        modal.remove();
+        renderAdminGuildsContent();
+      } else {
+        alert('创建失败：' + (r.message || ''));
+      }
+    } catch (e) { alert('出错：' + e.message); }
+  };
+};
+
+function renderAdminPinList() {
+  const host = document.getElementById('adminPinned');
+  if (!host) return;
+  if (_adminPinOrder.length === 0) {
+    host.innerHTML = `<div class="hint">目前没有置顶帖。可在帖子详情页用「编辑帖子」面板里的置顶开关来置顶。</div>`;
+    return;
+  }
+  const byId = new Map(_adminPinPosts.map(p => [p.id, p]));
+  host.innerHTML = `
+    <div id="adminPinRows">
+      ${_adminPinOrder.map((id, idx) => {
+        const p = byId.get(id) || { id, title: '(该帖已不存在)', category: '', authorUid: '', authorNickname: null, createdAt: '' };
+        const isFirst = idx === 0;
+        const isLast = idx === _adminPinOrder.length - 1;
+        const author = p.authorNickname || (p.authorUid ? `用户${p.authorUid}` : '');
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;background:#fffbeb">
+          <span style="font-weight:700;color:#b45309;min-width:24px;text-align:center">${idx + 1}</span>
+          ${categoryBadgeHtml(p.category)}
+          <a href="#detail/${p.id}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#2563eb;text-decoration:none" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</a>
+          <span style="white-space:nowrap;color:#6b7280;font-size:12px;display:flex;align-items:center;gap:4px">${escapeHtml(author)}${guildBadge(p)}${p.createdAt ? ` · ${escapeHtml(formatTime(p.createdAt))}` : ''}</span>
+          <button class="ghost" ${isFirst ? 'disabled' : ''} onclick="window._adminPinMove(${id},-1)" style="padding:2px 10px">↑</button>
+          <button class="ghost" ${isLast ? 'disabled' : ''} onclick="window._adminPinMove(${id},1)" style="padding:2px 10px">↓</button>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <button onclick="window._adminPinSave()">💾 保存顺序</button>
+      <button class="secondary" onclick="window._adminPinReset()">↩ 重置</button>
+      <span id="adminPinMsg" style="font-size:13px"></span>
+    </div>
+  `;
+}
+
+window._adminPinMove = function _adminPinMove(id, dir) {
+  const idx = _adminPinOrder.indexOf(id);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= _adminPinOrder.length) return;
+  [_adminPinOrder[idx], _adminPinOrder[newIdx]] = [_adminPinOrder[newIdx], _adminPinOrder[idx]];
+  renderAdminPinList();
+};
+window._adminPinReset = async function _adminPinReset() {
+  const r = await api.admin.pinnedPosts();
+  if (r.success) {
+    _adminPinPosts = r.data || [];
+    _adminPinOrder = _adminPinPosts.map(p => p.id);
+    renderAdminPinList();
+    const m = document.getElementById('adminPinMsg'); if (m) { m.textContent = '已重置为服务端顺序'; m.style.color = '#6b7280'; }
+  }
+};
+window._adminPinSave = async function _adminPinSave() {
+  const msg = document.getElementById('adminPinMsg');
+  if (msg) { msg.textContent = '保存中...'; msg.style.color = '#6b7280'; }
+  try {
+    const r = await api.admin.updatePinOrder(_adminPinOrder);
+    if (r.success) {
+      // 保存后重新拉取确认（后端会按 pin_order 重排）
+      const rr = await api.admin.pinnedPosts();
+      if (rr.success) {
+        _adminPinPosts = rr.data || [];
+        _adminPinOrder = _adminPinPosts.map(p => p.id);
+      }
+      renderAdminPinList();
+      const m = document.getElementById('adminPinMsg');
+      if (m) { m.textContent = '✅ 顺序已保存'; m.style.color = '#059669'; }
+    } else {
+      const m = document.getElementById('adminPinMsg');
+      if (m) { m.textContent = `❌ ${r.message || '保存失败'}`; m.style.color = '#dc2626'; }
+    }
+  } catch (e) {
+    const m = document.getElementById('adminPinMsg');
+    if (m) { m.textContent = `❌ ${e.message}`; m.style.color = '#dc2626'; }
+  }
+};
+
+// ==================== 管理员：账号列表渲染 + 封禁/注销二次确认 ====================
+/**
+ * 渲染管理员面板的账号列表板块（含最后登录时间、状态徽章、封禁/注销操作按钮）。
+ * 拆成独立函数，便于封禁/注销成功后单独刷新本板块而不影响其他板块状态。
+ */
+async function renderAdminUsers(host) {
+  if (!host) return;
+  host.innerHTML = `🔄 加载中...`;
+  try {
+    const r = await api.admin.listUsers();
+    if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+    const users = r.data || [];
+    if (users.length === 0) { host.innerHTML = `<span class="hint">暂无注册账号</span>`; return; }
+
+    const me = api.getCurrentUser();
+    const myUid = me && me.uid;
+    const myRole = me && me.role;
+
+    // 按 UID 分组：261* → 广五本部，262* → 金碧校区，其他 → 其他
+    // 第 4 位：1=初中，2=高中
+    const isCampusA = u => /^261/.test(String(u.uid));   // 广五本部
+    const isCampusB = u => /^262/.test(String(u.uid));   // 金碧校区
+    const isJunior   = u => /^26[12]1/.test(String(u.uid)); // 初中
+    const isSenior   = u => /^26[12]2/.test(String(u.uid)); // 高中
+
+    const groupA = users.filter(isCampusA);
+    const groupB = users.filter(isCampusB);
+    const groupC = users.filter(u => !isCampusA(u) && !isCampusB(u));
+
+    // 渲染单个分组表格的内部函数
+    function groupTable(title, subtitle, list, color) {
+      if (list.length === 0) return '';
+      return `
+        <div style="margin-bottom:18px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="display:inline-block;width:4px;height:18px;background:${color};border-radius:2px"></span>
+            <span style="font-weight:600;font-size:14px">${escapeHtml(title)}</span>
+            <span style="font-size:12px;color:#6b7280">· ${list.length} 个账号</span>
+          </div>
+          ${subtitle ? `<div style="font-size:12px;color:#9ca3af;margin-bottom:6px">${escapeHtml(subtitle)}</div>` : ''}
+          <div style="overflow-x:auto">
+            <table class="admin-table">
+              <thead><tr>
+                <th>UID</th><th>昵称</th><th>公会</th><th>角色</th><th>等级</th><th>积分</th><th>帖子数</th>
+                <th>注册时间</th><th>最后登录</th><th>状态</th><th>操作</th>
+              </tr></thead>
+              <tbody>
+                ${list.map(u => buildUserRow(u, myUid, myRole)).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // 校区分组内部再按初中/高中分组渲染
+    function campusWithSubGroups(campusTitle, campusColor, campusList) {
+      if (campusList.length === 0) return '';
+      const junior = campusList.filter(isJunior);
+      const senior = campusList.filter(isSenior);
+      const other  = campusList.filter(u => !isJunior(u) && !isSenior(u));
+      return `
+        <div style="margin-bottom:22px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="display:inline-block;width:4px;height:20px;background:${campusColor};border-radius:2px"></span>
+            <span style="font-weight:700;font-size:15px">${escapeHtml(campusTitle)}</span>
+            <span style="font-size:12px;color:#6b7280">· ${campusList.length} 个账号</span>
+          </div>
+          <div style="margin-left:12px">
+            ${groupTable('初中部', '26 年学生账号 · 初中', junior, campusColor)}
+            ${groupTable('高中部', '26 年学生账号 · 高中', senior, campusColor)}
+            ${other.length ? groupTable('其他', '非标准格式账号', other, '#6b7280') : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    // "其他"分组内部再按管理员/普通用户分组
+    function otherWithSubGroups(otherList) {
+      if (otherList.length === 0) return '';
+      const admins = otherList.filter(u => u.role === 'ops_admin');
+      const normal = otherList.filter(u => u.role !== 'ops_admin');
+      return `
+        <div style="margin-bottom:22px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="display:inline-block;width:4px;height:20px;background:#6b7280;border-radius:2px"></span>
+            <span style="font-weight:700;font-size:15px">其他</span>
+            <span style="font-size:12px;color:#6b7280">· ${otherList.length} 个账号</span>
+          </div>
+          <div style="margin-left:12px">
+            ${groupTable('管理员', '运维管理员账号', admins, '#dc2626')}
+            ${groupTable('普通账号', '非 26 开头的普通账号', normal, '#6b7280')}
+          </div>
+        </div>
+      `;
+    }
+
+    host.innerHTML = `
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px">共 ${users.length} 个账号 · 危险操作（封禁/注销）需二次确认</div>
+      ${campusWithSubGroups('广五本部', '#1e40af', groupA)}
+      ${campusWithSubGroups('金碧校区', '#059669', groupB)}
+      ${otherWithSubGroups(groupC)}
+    `;
+
+    // 事件委托
+    host.querySelectorAll('[data-act]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.act;
+        const uid = btn.dataset.uid;
+        const nick = btn.dataset.nick;
+        const posts = btn.dataset.posts;
+        const exp  = btn.dataset.exp;
+        if (act === 'ban')        confirmBan(uid, nick);
+        if (act === 'unban')      confirmUnban(uid, nick);
+        if (act === 'delete')     confirmDelete(uid, nick, posts);
+        if (act === 'adjust-exp') showAdjustExpModal(uid, nick, Number(exp || 0));
+      });
+    });
+  } catch (e) {
+    host.innerHTML = `❌ ${escapeHtml(e.message)}`;
+  }
+}
+
+// 构建单个用户表格行（两个分组共用，避免重复代码）
+function buildUserRow(u, myUid, myRole) {
+  const isMe = u.uid === myUid;
+  const isOpsAdmin = u.role === 'ops_admin';
+  const canBan    = !isMe && !isOpsAdmin;
+  const canUnban  = !isMe && u.isBanned && !isOpsAdmin;
+  const canDelete = !isMe && !isOpsAdmin;
+
+  const banBtn = u.isBanned
+    ? (canUnban
+        ? `<button class="btn-mini btn-success" data-act="unban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">解封</button>`
+        : `<span class="hint" style="margin:0">—</span>`)
+    : (canBan
+        ? `<button class="btn-mini btn-danger" data-act="ban" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}">封禁</button>`
+        : `<span class="hint" style="margin:0">—</span>`);
+  const delBtn = canDelete
+    ? `<button class="btn-mini btn-warning" data-act="delete" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-posts="${u.postCount || 0}">注销</button>`
+    : (isMe ? `<span class="hint" style="margin:0" title="不能注销自己">本人</span>` : `<span class="hint" style="margin:0" title="该账号受保护">—</span>`);
+
+  const statusBadge = u.isBanned
+    ? `<span class="status-badge status-banned">已封禁</span>`
+    : `<span class="status-badge status-normal">正常</span>`;
+  const lastLogin = u.lastLoginAt ? escapeHtml(formatTime(u.lastLoginAt)) : `<span class="hint" style="margin:0">从未登录</span>`;
+  const roleText = isOpsAdmin ? '运维管理员' : '普通成员';
+  const selfTag = isMe ? ` <span style="color:#0071e3;font-size:11px">（我）</span>` : '';
+
+  // 等级 & 积分（ops_admin → Lv.999）
+  const levelInfo = api.getLevelInfo(Number(u.expPoints || 0), u.role);
+  const levelBadge = isOpsAdmin
+    ? `<span style="color:#dc2626;font-weight:700">Lv.999</span>`
+    : `Lv.${levelInfo.level}`;
+  const expBtn = `<button class="btn-mini" style="background:#3b82f6;color:#fff" data-act="adjust-exp" data-uid="${escapeHtml(u.uid)}" data-nick="${escapeHtml(u.nickname)}" data-exp="${Number(u.expPoints || 0)}">调整积分</button>`;
+
+  const guildCell = (u.guildId && u.guildName)
+    ? `${guildBadge(u)}`
+    : `<span class="hint" style="margin:0">没有</span>`;
+
+  return `<tr>
+    <td><a href="#user/${escapeHtml(u.uid)}" style="color:#2563eb;text-decoration:none">${escapeHtml(u.uid)}</a></td>
+    <td><a href="#user/${escapeHtml(u.uid)}" style="color:inherit;text-decoration:none">${escapeHtml(u.nickname)}</a>${selfTag}</td>
+    <td>${guildCell}</td>
+    <td>${roleText}</td>
+    <td>${levelBadge}</td>
+    <td>${Number(u.expPoints || 0)}</td>
+    <td>${u.postCount || 0}</td>
+    <td>${escapeHtml(formatTime(u.createdAt))}</td>
+    <td>${lastLogin}</td>
+    <td>${statusBadge}</td>
+    <td class="action-cell">${expBtn}${banBtn}${delBtn}</td>
+  </tr>`;
+}
+
+/**
+ * 通用二次确认弹窗（危险操作专用）。
+ * @param {Object} opts
+ * @param {string} opts.title       弹窗标题
+ * @param {string} opts.message     正文（允许 HTML，调用方自行 escape）
+ * @param {string} opts.confirmText 确认按钮文案
+ * @param {string} [opts.cancelText] 取消按钮文案（默认"取消"）
+ * @param {boolean} [opts.danger]    是否危险（红色按钮）
+ * @param {string} [opts.requireText] 需要用户精确输入的文本（输入正确才解锁确认按钮，不可逆操作专用）
+ * @returns {Promise<boolean>}     true=用户确认，false=取消
+ */
+function adminConfirm(opts) {
+  return new Promise(resolve => {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.style.zIndex = '120';
+    const needInput = !!opts.requireText;
+    const requireList = Array.isArray(opts.requireText) ? opts.requireText : (opts.requireText ? [opts.requireText] : []);
+    const requireDisplay = requireList.map(escapeHtml).join(' 或 ');
+    mask.innerHTML = `
+      <div class="modal" style="max-width:460px">
+        <div class="modal-header">
+          <span class="modal-title">${opts.danger ? '⚠️ ' : ''}${escapeHtml(opts.title || '确认操作')}</span>
+        </div>
+        <div class="modal-body" style="font-size:14px;line-height:1.7;white-space:normal">
+          ${opts.message || ''}
+          ${needInput ? `
+            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e5e7eb">
+              <div style="font-size:12px;color:#6b7280;margin-bottom:6px">请输入 <b>${requireDisplay}</b> 以确认：</div>
+              <input id="adminConfirmInput" type="text" autocomplete="off" style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:14px" />
+            </div>` : ''}
+        </div>
+        <div class="modal-footer" style="justify-content:flex-end;gap:8px">
+          <button class="secondary" id="adminConfirmCancel">${escapeHtml(opts.cancelText || '取消')}</button>
+          <button id="adminConfirmOk" ${opts.danger ? 'class="danger"' : ''} ${needInput ? 'disabled' : ''}>${escapeHtml(opts.confirmText || '确认')}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(mask);
+
+    const okBtn = mask.querySelector('#adminConfirmOk');
+    const cancelBtn = mask.querySelector('#adminConfirmCancel');
+    let done = false;
+    const close = (result) => {
+      if (done) return;
+      done = true;
+      mask.remove();
+      resolve(result);
+    };
+    cancelBtn.addEventListener('click', () => close(false));
+    mask.addEventListener('click', e => { if (e.target === mask) close(false); });
+    okBtn.addEventListener('click', () => close(true));
+
+    if (needInput) {
+      const input = mask.querySelector('#adminConfirmInput');
+      const check = () => { okBtn.disabled = !requireList.includes(input.value.trim()); };
+      input.addEventListener('input', check);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter' && !okBtn.disabled) close(true); });
+      setTimeout(() => input.focus(), 0);
+    } else {
+      okBtn.addEventListener('keydown', e => { if (e.key === 'Enter') close(true); });
+      setTimeout(() => okBtn.focus(), 0);
+    }
+    document.addEventListener('keydown', function esc(e) {
+      if (e.key === 'Escape') { close(false); document.removeEventListener('keydown', esc); }
+    });
+  });
+}
+
+// ---- 封禁（危险：禁止登录）----
+async function confirmBan(uid, nick) {
+  const ok = await adminConfirm({
+    title: '封禁账号',
+    danger: true,
+    confirmText: '确认封禁',
+    message: `确定要封禁账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>
+              封禁后该用户将<b>无法登录</b>，但已发布内容保留。<br/>
+              你可随时在右侧点「解封」恢复登录。`,
+  });
+  if (!ok) return;
+  const r = await api.admin.banUser(uid);
+  if (r.success) {
+    await renderAdminUsers(document.getElementById('adminUsers'));
+  } else {
+    alert(`封禁失败：${r.message || '未知错误'}`);
+  }
+}
+
+// ---- 解封（恢复正常登录，非危险，但仍二次确认防误触）----
+async function confirmUnban(uid, nick) {
+  const ok = await adminConfirm({
+    title: '解封账号',
+    confirmText: '确认解封',
+    message: `确定要解封账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>解封后该用户可正常登录。`,
+  });
+  if (!ok) return;
+  const r = await api.admin.unbanUser(uid);
+  if (r.success) {
+    await renderAdminUsers(document.getElementById('adminUsers'));
+  } else {
+    alert(`解封失败：${r.message || '未知错误'}`);
+  }
+}
+
+// ---- 注销（最危险：物理删除 + 级联，不可恢复，必须输入 UID 或昵称解锁）----
+async function confirmDelete(uid, nick, posts) {
+  const ok = await adminConfirm({
+    title: '永久注销账号',
+    danger: true,
+    confirmText: '确认永久注销',
+    requireText: [uid, nick],
+    message: `<b style="color:#dc2626">⚠ 此操作不可恢复！</b><br/>
+              确定要永久注销账号 <b>${escapeHtml(nick)}</b>（UID：${escapeHtml(uid)}）吗？<br/>
+              将<b>物理删除</b>该用户及其所有关联数据，包括：
+              <ul style="margin:6px 0 0 18px;padding:0">
+                <li>帖子 ${escapeHtml(String(posts || 0))} 篇</li>
+                <li>全部评论、楼中楼回复</li>
+                <li>所有私信记录</li>
+                <li>点赞、收藏数据</li>
+              </ul>
+              为防止误操作，请在下方输入该账号的 <b>UID（${escapeHtml(uid)}）</b> 或 <b>昵称（${escapeHtml(nick)}）</b> 以解锁确认按钮。`,
+  });
+  if (!ok) return;
+  const r = await api.admin.deleteUser(uid);
+  if (r.success) {
+    await renderAdminUsers(document.getElementById('adminUsers'));
+  } else {
+    alert(`注销失败：${r.message || '未知错误'}`);
+  }
+}
+
+// ==================== 管理员调整用户积分弹窗 ====================
+function showAdjustExpModal(uid, nick, currentExp) {
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.style.zIndex = '120';
+  mask.innerHTML = `
+    <div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <span class="modal-title">⚙️ 调整积分</span>
+      </div>
+      <div class="modal-body">
+        <div style="margin-bottom:8px;font-size:14px">UID: <b>${escapeHtml(uid)}</b></div>
+        <div style="margin-bottom:12px;font-size:14px">昵称: <b>${escapeHtml(nick || '—')}</b></div>
+        <div style="margin-bottom:4px;font-size:13px;color:#6b7280">当前积分</div>
+        <div style="font-size:22px;font-weight:700;color:#2563eb;margin-bottom:12px">${currentExp}</div>
+        <div style="margin-bottom:4px;font-size:13px;color:#6b7280">设置为（非负整数）</div>
+        <input id="adjustExpInput" type="number" min="0" step="1" value="${currentExp}"
+               style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:15px" />
+        <div style="margin-top:8px;display:flex;gap:6px">
+          <button id="expQuickMinus50" class="ghost" style="padding:4px 10px;font-size:12px">-50</button>
+          <button id="expQuickMinus10" class="ghost" style="padding:4px 10px;font-size:12px">-10</button>
+          <button id="expQuickPlus10"  class="ghost" style="padding:4px 10px;font-size:12px">+10</button>
+          <button id="expQuickPlus50"  class="ghost" style="padding:4px 10px;font-size:12px">+50</button>
+          <button id="expQuickSet0"    class="ghost" style="padding:4px 10px;font-size:12px">清零</button>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:flex-end;gap:8px">
+        <button class="ghost" id="adjustExpCancelBtn">取消</button>
+        <button class="secondary" id="adjustExpOkBtn">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(mask);
+
+  const input = mask.querySelector('#adjustExpInput');
+  const close = () => mask.remove();
+  mask.querySelector('#adjustExpCancelBtn').onclick = close;
+  mask.onclick = (e) => { if (e.target === mask) close(); };
+
+  // 快捷调整按钮
+  const delta = (d) => { input.value = Math.max(0, (parseInt(input.value, 10) || 0) + d); };
+  mask.querySelector('#expQuickMinus50').onclick = () => delta(-50);
+  mask.querySelector('#expQuickMinus10').onclick = () => delta(-10);
+  mask.querySelector('#expQuickPlus10').onclick  = () => delta(+10);
+  mask.querySelector('#expQuickPlus50').onclick  = () => delta(+50);
+  mask.querySelector('#expQuickSet0').onclick    = () => { input.value = 0; };
+
+  mask.querySelector('#adjustExpOkBtn').onclick = async () => {
+    const v = parseInt(input.value, 10);
+    if (!Number.isFinite(v) || v < 0) { alert('请输入有效的非负整数'); return; }
+    const okBtn = mask.querySelector('#adjustExpOkBtn');
+    okBtn.disabled = true; okBtn.textContent = '保存中...';
+    const r = await api.admin.adjustExp(uid, v);
+    if (r.success) {
+      alert(`✅ 调整成功：${nick || uid} 的积分 ${currentExp} → ${r.data.newExp}`);
+      close();
+      await renderAdminUsers(document.getElementById('adminUsers'));
+    } else {
+      alert(`❌ 调整失败：${r.message || '未知错误'}`);
+      okBtn.disabled = false; okBtn.textContent = '保存';
+    }
+  };
+  setTimeout(() => input.focus(), 50);
+}
+
+// ==================== 登录后：未读公告逐条弹窗 ====================
+async function popupUnreadAnnouncements() {
+  if (!api.isLoggedIn()) return;
+  let list;
+  try {
+    const r = await api.announcements.unread();
+    if (!r.success) return;
+    list = r.data || [];
+  } catch { return; }
+  if (list.length === 0) return;
+
+  // 逐条展示，用户点"知道了"再下一条
+  let idx = 0;
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+
+  function show(i) {
+    const a = list[i];
+    if (!a) { container.remove(); return; }
+    container.innerHTML = `
+      <div class="modal-mask">
+        <div class="modal">
+          <div class="modal-header">
+            <span class="modal-title">
+              📢 ${escapeHtml(a.title)}
+              ${a.isPinned ? '<span class="badge-pin">置顶</span>' : ''}
+            </span>
+            <span style="font-size:12px;color:#86868b">${escapeHtml(formatTime(a.createdAt))}　${i + 1}/${list.length}</span>
+          </div>
+          <div class="modal-body">${escapeHtml(a.content)}</div>
+          <div class="modal-footer">
+            <span>by ${escapeHtml(a.authorNickname || '管理员')}</span>
+            <button id="annCloseBtn">知道了</button>
+          </div>
+        </div>
+      </div>
+    `;
+    const btn = document.getElementById('annCloseBtn');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '处理中...';
+      await api.announcements.markRead(a.id);
+      show(i + 1);
+    });
+  }
+  show(idx);
+}
+
+// ==================== 事件处理：登录/注册/发帖 ====================
+window.doLogin = async function doLogin() {
+  const uid = document.getElementById('uidInput').value.trim();
+  const password = document.getElementById('pwdInput').value;
+  if (!/^\d{8}$/.test(uid)) return alert('请输入 8 位数字 UID');
+  if (!password) return alert('请输入密码');
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; btn.textContent = '登录中...';
+  try {
+    const r = await api.auth.login(uid, password);
+    if (r.success) {
+      await renderTopBar();
+      location.hash = 'forum';
+    } else alert(r.message || '登录失败');
+  } finally {
+    btn.disabled = false; btn.textContent = '登录';
+  }
+};
+window.doRegister = async function doRegister() {
+  const campus = document.getElementById('campusSelect').value;
+  const level = document.getElementById('levelSelect').value;
+  const cls = (document.getElementById('classInput').value || '').trim();
+  const stuNo = (document.getElementById('stuNoInput').value || '').trim();
+  const uid = `26${campus}${level}${cls.padStart(2,'0')}${stuNo.padStart(2,'0')}`;
+  const pwd = document.getElementById('pwdInput').value;
+  const confirm = document.getElementById('pwd2Input').value;
+  const nickname = (document.getElementById('nickInput').value || '').trim();
+  const bio = (document.getElementById('bioInput').value || '').trim();
+  if (!/^26[12][12]\d{4}$/.test(uid)) return alert('UID 格式无效，请检查班级和学号是否各为 2 位数字');
+  if (pwd.length < 6) return alert('密码至少 6 位');
+  if (pwd !== confirm) return alert('两次输入的密码不一致');
+  if (!document.getElementById('agreeInput').checked) return alert('请先阅读并勾选同意《关于本站》中的声明后再注册');
+  const payload = { uid, password: pwd };
+  if (nickname) payload.nickname = nickname;
+  if (bio) payload.bio = bio;
+  const btn = document.getElementById('regBtn');
+  btn.disabled = true; btn.textContent = '注册中...';
+  try {
+    const r = await api.auth.register(payload);
+    if (!r.success) { alert(r.message); return; }
+    // 自动登录
+    const lr = await api.auth.login(uid, pwd);
+    if (lr.success) {
+      await renderTopBar();
+      location.hash = 'about';
+      alert('🎉 注册成功！已自动登录\n\n请先阅读「关于本站」内容，了解论坛规则后再进入论坛。');
+    } else {
+      alert('注册成功，请手动登录：' + (lr.message || ''));
+      location.hash = 'login';
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = '注册';
+  }
+};
+window.doLogout = function doLogout() {
+  api.auth.logout();
+  renderTopBar();
+  location.hash = 'home';
+};
+// ==================== 管理员编辑帖子保存 ====================
+window._doEditPost = async function doEditPost(postId, originalPinned = false) {
+  const title = document.getElementById('editTitleInput').value.trim();
+  const content = document.getElementById('editContentInput').value.trim();
+  const category = document.getElementById('editCategorySelect').value;
+  // 收集标签 chip（DOM 里的 textContent）
+  const tagChips = document.querySelectorAll('#editTagChips .tag-chip');
+  const tags = [];
+  tagChips.forEach(chip => {
+    let t = chip.textContent.replace(/^#/, '').replace(/×$/, '').trim();
+    if (t) tags.push(t);
+  });
+  // 也尝试从输入框吸收残留
+  const tagInput = document.getElementById('editTagInput');
+  if (tagInput && tagInput.value) {
+    const items = tagInput.value.split(/#+/).map(s => s.trim()).filter(Boolean);
+    for (const it of items) {
+      const t = it.slice(0, 20);
+      if (!tags.includes(t) && tags.length < 5) tags.push(t);
+    }
+  }
+  if (!title || !content) return alert('标题和内容不能为空');
+
+  // 置顶开关（管理员专属）：和原始状态对比，变化才调 pin 接口
+  const pinCheckbox = document.getElementById('editPinCheckbox');
+  const newPinned = pinCheckbox ? !!pinCheckbox.checked : !!originalPinned;
+  const pinChanged = newPinned !== !!originalPinned;
+
+  const btn = document.getElementById('saveEditBtn');
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    const r = await api.posts.update(postId, { title, content, tags, category });
+    if (!r.success) { alert(r.message || '编辑失败'); return; }
+
+    // 内容保存成功后，若置顶状态变化，再调置顶接口
+    let pinMsg = '';
+    if (pinChanged) {
+      const pr = await api.posts.setPin(postId, newPinned);
+      if (!pr.success) {
+        pinMsg = `（但置顶操作失败：${pr.message || '未知错误'}）`;
+      }
+    }
+
+    alert(`✅ 编辑成功！${pinMsg}`);
+    // 重新渲染详情页
+    renderDetail(document.getElementById('app'), postId);
+  } finally {
+    btn.disabled = false; btn.textContent = '保存修改';
+  }
+};
+
+window.doPost = async function doPost() {
+  const title = document.getElementById('titleInput').value.trim();
+  const content = document.getElementById('contentInput').value.trim();
+  // 输入框可能没失焦/没按回车，最后一次尝试把输入框里残留的文本当标签吸收
+  const tagInput = document.getElementById('tagInput');
+  if (tagInput) {
+    try {
+      const raw = (tagInput.value || '').trim();
+      const items = raw.split(/#+/).map(s => s.trim()).filter(Boolean);
+      for (const it of items) {
+        const t = it.slice(0, 20);
+        if (!draftPostTags.includes(t) && draftPostTags.length < 5 && !/["'\\<>{}]/.test(t)) draftPostTags.push(t);
+      }
+    } catch {}
+  }
+  if (!title || !content) return alert('标题和内容不能为空');
+  const tags = [...draftPostTags]; // 拷贝一份，防止发布中用户还在改 chip
+  const category = String(draftPostCategory || 'general');
+  const imageIds = draftPostImages.map(img => img.id);
+  const btn = document.getElementById('postBtn');
+  btn.disabled = true; btn.textContent = '发布中...';
+  try {
+    const r = await api.posts.create(title, content, tags, category, draftPostPinned, imageIds, draftPostRegion);
+    if (r.success) { location.hash = 'forum'; refreshNotificationBadge(); }
+    else alert(r.message || '发布失败');
+  } finally {
+    btn.disabled = false; btn.textContent = '发布';
+  }
+};
+
+// ==================== 申请删除/封禁弹窗（供详情页「申请删除/封禁」按钮复用）====================
+// presetType: delete_post | delete_comment | ban_user | ban_guild
+// presetTargetId: 帖子id | 评论id | 用户uid | 公会id
+// onSuccess?: 回调（提交成功后触发，用于刷新面板）
+window.openAdminRequestDialog = function openAdminRequestDialog({ presetType, presetTargetId, onSuccess }) {
+  const TYPES = [
+    { key: 'delete_post',    label: '删除帖子', placeholder: '请输入帖子编号（#数字后面的数字）', fieldLabel: '帖子编号' },
+    { key: 'delete_comment', label: '删除评论', placeholder: '请输入评论编号', fieldLabel: '评论编号' },
+    { key: 'ban_user',       label: '封禁用户', placeholder: '请输入用户 UID（8 位数字）', fieldLabel: '用户 UID' },
+    { key: 'ban_guild',      label: '封禁公会', placeholder: '请输入公会 ID', fieldLabel: '公会 ID' },
+  ];
+  const defaultType = presetType || 'delete_post';
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.innerHTML = `
+    <div class="modal-box" style="max-width:480px">
+      <div style="font-weight:600;font-size:16px;margin-bottom:12px;color:#1d4ed8">📝 提交申请</div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">申请类型</label>
+        <select id="arType" class="input">
+          ${TYPES.map(t => `<option value="${t.key}"${t.key === defaultType ? ' selected' : ''}>${t.label}</option>`).join('')}
+        </select>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl" id="arTargetLabel">目标编号</label>
+        <input id="arTarget" class="input" placeholder="..." />
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">申请理由（必填）</label>
+        <textarea id="arReason" class="input" rows="4" placeholder="请填写理由"></textarea>
+      </div>
+      <div id="arErr" style="color:#dc2626;font-size:12px;margin-bottom:8px;min-height:1em"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="secondary" id="arCancel">取消</button>
+        <button id="arOk">提交申请</button>
+      </div>
+    </div>`;
+  document.body.appendChild(mask);
+  const errEl = mask.querySelector('#arErr');
+  const sel = mask.querySelector('#arType');
+  const targetInput = mask.querySelector('#arTarget');
+  const reasonInput = mask.querySelector('#arReason');
+  const targetLabel = mask.querySelector('#arTargetLabel');
+  function refreshTargetLabel() {
+    const t = TYPES.find(x => x.key === sel.value);
+    targetLabel.textContent = t ? t.fieldLabel : '目标编号';
+    targetInput.placeholder = t ? t.placeholder : '请输入';
+    if (presetTargetId && sel.value === presetType) targetInput.value = presetTargetId;
+  }
+  refreshTargetLabel();
+  if (presetTargetId) targetInput.value = presetTargetId;
+  sel.addEventListener('change', refreshTargetLabel);
+  mask.querySelector('#arCancel').addEventListener('click', () => mask.remove());
+  mask.addEventListener('click', (e) => { if (e.target === mask) mask.remove(); });
+  mask.querySelector('#arOk').addEventListener('click', async () => {
+    const type = sel.value;
+    const targetId = targetInput.value.trim();
+    const reason = reasonInput.value.trim();
+    errEl.textContent = '';
+    if (!targetId) { errEl.textContent = '请输入目标编号 / UID / ID'; return; }
+    if (!reason) { errEl.textContent = '请填写申请理由'; return; }
+    try {
+      const r = await api.adminRequests.create({ type, targetId, reason });
+      if (r && r.success) {
+        mask.remove();
+        alert('✅ 申请已提交');
+        if (typeof onSuccess === 'function') onSuccess(r.data);
+      } else {
+        errEl.textContent = (r && r.message) || '提交失败';
+      }
+    } catch (e) {
+      errEl.textContent = '网络异常：' + (e && e.message || '');
+    }
+  });
+};
+
+// ==================== 视图：协助管理员面板（ops_admin / admin 都可见） ====================
+async function renderAdminSub(app) {
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+  if (!me || (me.role !== 'ops_admin' && me.role !== 'admin')) {
+    app.innerHTML = `<div class="card">⛔ 仅管理员或运维管理员可访问该面板。<br><a href="#login">去登录</a> 或 <a href="#forum">返回广场</a></div>`;
+    return;
+  }
+  app.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  const roleLabel = me.role === 'ops_admin' ? '运维管理员' : '管理员';
+  const roleCss = me.role === 'ops_admin' ? '#dc2626' : '#1d4ed8';
+
+  let mineRes = { success: true, data: [] };
+  try { mineRes = await api.adminRequests.mine() || { success: true, data: [] }; } catch {}
+  const mine = Array.isArray(mineRes && mineRes.data) ? mineRes.data : [];
+  const pendingList = mine.filter(r => r.status === 'pending');
+  const executedList = mine.filter(r => r.status !== 'pending');
+
+  function statusBadge(s) {
+    if (s === 'pending') return `<span style="background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:10px;font-size:11px">待审批</span>`;
+    if (s === 'approved') return `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:11px">已执行</span>`;
+    if (s === 'rejected') return `<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:10px;font-size:11px">已拒绝</span>`;
+    return `<span>${s || ''}</span>`;
+  }
+  function typeBadge(t) {
+    const label = { delete_post: '删帖', delete_comment: '删评', ban_user: '封禁用户', ban_guild: '封禁公会' }[t] || t;
+    const color = { delete_post: '#2563eb', delete_comment: '#7c3aed', ban_user: '#dc2626', ban_guild: '#b45309' }[t] || '#6b7280';
+    return `<span style="background:${color}15;color:${color};padding:2px 8px;border-radius:10px;font-size:11px;margin-right:6px">${label}</span>`;
+  }
+  function reqCard(r) {
+    return `<div class="card" style="padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div>
+          ${typeBadge(r.type)}${statusBadge(r.status)}
+          <div style="font-size:14px;margin-top:6px"><b>目标：</b>${escapeHtml(r.targetSnapshot || r.targetId)}</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:4px">目标编号：${escapeHtml(r.targetId)}</div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#6b7280">
+          <div>${escapeHtml(r.createdAt || '')}</div>
+          <div style="margin-top:4px">申请人：${escapeHtml(r.requesterNickname || r.requesterUid)}</div>
+          ${r.reviewedAt ? `<div style="margin-top:4px">处理时间：${escapeHtml(r.reviewedAt)}</div>` : ''}
+        </div>
+      </div>
+      <div style="font-size:13px;margin-top:8px;background:#f9fafb;border-left:3px solid #6366f1;padding:6px 10px;border-radius:4px">
+        <b>理由：</b>${escapeHtml(r.reason || '（无）')}
+      </div>
+      ${r.status !== 'pending' ? `<div style="font-size:13px;margin-top:6px;background:#f3f4f6;border-left:3px solid #6b7280;padding:6px 10px;border-radius:4px">
+        <b>审批备注：</b>${escapeHtml(r.reviewerNote || '（无）')}
+      </div>` : ''}
+    </div>`;
+  }
+
+  app.innerHTML = `
+    <div class="toolbar" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <span style="font-size:16px;font-weight:600;color:${roleCss}">📝 管理员面板</span>
+      <span style="font-size:12px;color:#6b7280">身份：${roleLabel}（${escapeHtml(me.uid)}）</span>
+    </div>
+
+    <!-- 管理员守则（顶部折叠卡，默认展开以便查看） -->
+    <details class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b;background:#fffdf7" open>
+      <summary style="cursor:pointer;font-weight:600;color:#b45309;list-style:none;padding:6px 2px;user-select:none;display:flex;align-items:center;gap:8px">
+        <span>📜 管理员守则（工作前请先阅读）</span>
+        <span style="margin-left:auto;font-weight:400;font-size:12px;color:#9ca3af">点击可折叠 / 展开</span>
+      </summary>
+      <div style="margin-top:14px;padding:0 6px;color:#1f2937;line-height:1.85;font-size:14px">
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">一、角色与权限边界</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>你是管理员（下称"管理员"），可在论坛内进行合规巡查、删除等管理工作。</li>
+          <li>你只能操作和查看 <b>广五本部高中部（2612）分区</b> 的内容，不得越权介入其他分区事务。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">二、申请删除帖子 / 评论时要注意</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>每条内容的<b>编号</b>显示在右下角或头部，如"#14"；填编号时只需写<b>数字部分</b>（例如 14），不要带井号。</li>
+          <li>删除判断依据（满足任一即可申请）：①违规违法；②辱骂/人身攻击；③泄露他人隐私；④广告/刷单/引流；⑤恶意引战、刷屏灌水；⑥与分区主题严重不符。</li>
+          <li>若在帖子详情页 / 评论区看到违规内容，可直接点卡片上的 <b>「📝 申请删除」</b> 按钮——编号会自动预填，只需写理由。</li>
+          <li>理由虽然"随便写一两个字也行"，但<b>建议写清楚关键信息</b>（如"第 3 楼辱骂楼主"、"含赌博广告链接"），便于判断与归档。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">三、申请封禁用户 / 公会时要注意</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li><b>封禁用户</b>：目标是用户 UID（8 位数字，如 26110101）；可在用户主页头像旁、私信列表、帖子作者信息里找到。</li>
+          <li><b>封禁公会</b>：目标是公会 ID（在公会详情页标题旁可见，如 ID: #1）。</li>
+          <li>严禁因个人恩怨 / 私人关系申请封禁；<b>严禁</b>封禁 00000001 账号（运维管理员），系统会自动拦截。</li>
+          <li>用户主页 / 公会详情页也有<b>「🚫 申请封禁」</b>按钮，点进去会自动带上 UID / ID。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">四、申请进度与结果</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>提交的所有申请都会出现在下方 <b>「⏳ 待通过 / 已申请待处理」</b>，可以随时看到处理状态。</li>
+          <li>申请被处理后会出现在 <b>「✅ 已执行 / 历史处理」</b>，包含处理结果与说明。</li>
+          <li>相同目标、相同类型的待处理申请<b>不能重复提交</b>，系统会自动拦截。</li>
+          <li>若发现<b>申请被拒绝</b>，先查看"审批备注"；再遇到相同场景请调整判断标准。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">五、管理员言行 & 行为规范</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>管理员身份是一种信任，请保持在站内言论友善、客观；<b>不要用管理员身份压人、站队或带节奏</b>。</li>
+          <li>与普通用户发生争议时，<b>自动回避</b>：不要处理涉及自己 / 自己朋友的申请，交由其他管理员或运维管理员处理。</li>
+          <li>不得泄露申请记录里的敏感信息（如申请人 UID、审批备注、被举报人细节）。</li>
+          <li>账号与密码 <b>仅限本人使用</b>，禁止转借；若怀疑密码外泄请立即自行修改并告知运维管理员。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">六、快速上手 Checklist</h3>
+        <div style="padding:10px 14px;background:#fff7ed;border-radius:6px;border:1px dashed #fcd34d">
+          1️⃣ 浏览广场 → 发现违规 → 记下帖子/评论 <b>编号</b> 或直接点详情页按钮 → 写理由 → 提交<br>
+          2️⃣ 发现有用户/公会严重违规 → 点进主页的 <b>申请封禁</b> → 写理由 → 提交<br>
+          3️⃣ 回到本面板下方查看处理结果；被拒绝就看备注、调整判断标准<br>
+          4️⃣ 有争议 / 拿不准 → <b>先不处理</b>，私信 <b>00000001（运维管理员）</b> 汇报，对话在私信列表顶部常驻
+        </div>
+      </div>
+    </details>
+
+    <!-- 申请板块 1：删除帖子 / 删除评论 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:10px;color:#2563eb">🗑 删除内容申请（帖子 / 评论）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label class="lbl">① 版块：删除帖子</label>
+          <input id="inp-post-id" class="input" placeholder="帖子编号（例如 12）" />
+          <textarea id="inp-post-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('delete_post','inp-post-id','inp-post-reason')" style="margin-top:6px">申请删除帖子</button>
+        </div>
+        <div>
+          <label class="lbl">② 版块：删除评论</label>
+          <input id="inp-cmt-id" class="input" placeholder="评论编号（例如 58）" />
+          <textarea id="inp-cmt-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('delete_comment','inp-cmt-id','inp-cmt-reason')" style="margin-top:6px">申请删除评论</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 申请板块 2：封禁用户 / 封禁公会 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:10px;color:#dc2626">🚫 封禁申请（用户 / 公会）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label class="lbl">③ 版块：封禁用户</label>
+          <input id="inp-user-uid" class="input" placeholder="用户 UID（8 位数字，例如 26110101）" />
+          <textarea id="inp-user-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('ban_user','inp-user-uid','inp-user-reason')" style="margin-top:6px">申请封禁用户</button>
+        </div>
+        <div>
+          <label class="lbl">④ 版块：封禁公会</label>
+          <input id="inp-guild-id" class="input" placeholder="公会 ID（例如 1）" />
+          <textarea id="inp-guild-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('ban_guild','inp-guild-id','inp-guild-reason')" style="margin-top:6px">申请封禁公会</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="toolbar"><span style="font-weight:600;color:#b45309">⏳ 待通过 / 已申请待处理（共 ${pendingList.length}）</span></div>
+        ${pendingList.length ? pendingList.map(reqCard).join('') : `<div class="card" style="color:#6b7280">暂无待审批申请。</div>`}
+      </div>
+      <div>
+        <div class="toolbar"><span style="font-weight:600;color:#166534">✅ 已执行 / 历史处理（共 ${executedList.length}）</span></div>
+        ${executedList.length ? executedList.slice(0, 100).map(reqCard).join('') : `<div class="card" style="color:#6b7280">暂无历史记录。</div>`}
+      </div>
+    </div>
+  `;
+
+  window.submitRequest = async function (type, idInpId, reasonInpId) {
+    const tid = (document.getElementById(idInpId).value || '').trim();
+    const reason = (document.getElementById(reasonInpId).value || '').trim();
+    if (!tid) { alert('请输入目标编号 / UID / ID'); return; }
+    if (!reason) { alert('请填写申请理由'); return; }
+    const r = await api.adminRequests.create({ type, targetId: tid, reason });
+    if (r && r.success) {
+      alert('✅ 申请已提交');
+      renderAdminSub(document.getElementById('app'));
+    } else {
+      alert('❌ ' + ((r && r.message) || '提交失败'));
+    }
+  };
+}
+
+// ==================== 视图：用户公开主页（点头像/昵称进入） ====================
+async function renderUserProfile(app, uid) {
+  app.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  let profile = null, postsRes = null;
+  try {
+    const [pr, pl] = await Promise.all([
+      api.users.getProfile(uid),
+      api.posts.list(1, 20, { author: uid }),
+    ]);
+    if (pr && pr.success) profile = pr.data;
+    if (pl && pl.success) postsRes = pl;
+  } catch {}
+
+  if (!profile) {
+    app.innerHTML = `<div class="card"><p>用户不存在或已注销。</p><button class="secondary" onclick="history.back()">← 返回</button></div>`;
+    return;
+  }
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+  const isMe = me && me.uid === profile.uid;
+  const canMessage = !isMe && api.isLoggedIn();
+  const messageBtn = canMessage
+    ? `<button onclick="openQuickMessage('${escapeHtml(profile.uid)}','${escapeHtml(profile.nickname)}')" style="margin-top:8px">✉️ 发私信</button>`
+    : '';
+  const editBtn = isMe
+    ? `<button class="secondary" onclick="location.hash='me'" style="margin-top:8px">✏️ 去编辑我的资料</button>`
+    : '';
+  const header = `
+    <div class="profile-header" id="userProfileHeader">
+      <div class="avatar-lg">${buildAvatarInner(profile)}</div>
+      <div style="flex:1">
+        <div class="profile-name">${escapeHtml(profile.nickname)}${guildBadge(profile)}${roleBadgeInline(profile.role)}${isMe ? ' <span style="color:#6b7280;font-size:12px;margin-left:6px">（这是你自己）</span>' : ''}</div>
+        <div class="profile-uid">UID：${escapeHtml(profile.uid)}　帖子数：${profile.postCount || 0}　注册于 ${escapeHtml(formatTime(profile.createdAt))}</div>
+        ${profile.bio ? `<div class="profile-bio">${escapeHtml(profile.bio)}</div>` : '<div class="profile-bio" style="opacity:0.6">这个人还没有写简介</div>'}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${editBtn}${messageBtn}
+          ${(me && (me.role === 'ops_admin' || me.role === 'admin') && profile.role !== 'ops_admin' && !isMe)
+            ? `<button class="secondary" style="margin-top:8px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca" onclick="openAdminRequestDialog({presetType:'ban_user',presetTargetId:'${escapeHtml(profile.uid)}'})">🚫 申请封禁该用户</button>`
+            : ''}
+        </div>
+      </div>
+    </div>
+  `;
+  const list = (postsRes && Array.isArray(postsRes.data) && postsRes.data.length)
+    ? postsRes.data.map(p => postCard(p, { allowClick: true })).join('')
+    : `<div class="empty">该用户还没有发过帖子</div>`;
+  app.innerHTML = `
+    ${header}
+    <div class="toolbar"><button class="secondary" onclick="history.back()">← 返回</button></div>
+    <h3 style="margin:8px 0">${escapeHtml(profile.nickname)} 发布的帖子</h3>
+    <div class="post-list">${list}</div>
+  `;
+}
+
+// ==================== 公会：公会列表页 ====================
+async function renderGuilds(app) {
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+
+  app.innerHTML = `
+    <div class="toolbar"><span style="font-size:16px;font-weight:600">🏰 公会广场</span>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        ${api.isLoggedIn() ? `<button class="secondary" onclick="showGuildCreateModal()">📝 申请建公会</button>` : ''}
+      </div>
+    </div>
+    <div id="guildsMyInfo"></div>
+    <div id="guildsList">🔄 加载中...</div>
+  `;
+
+  // 我的公会状态
+  if (api.isLoggedIn()) {
+    try {
+      const r = await api.guilds.mine();
+      if (r.success && r.data) {
+        const g = r.data.guild;
+        const host = document.getElementById('guildsMyInfo');
+        host.innerHTML = `
+          <div class="card" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1px solid #f59e0b33">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+              <span style="font-size:24px">${g.icon || '🏰'}</span>
+              <span style="font-weight:600;color:#92400e">我已加入「${escapeHtml(g.name)}」</span>
+              <span class="level-badge">${escapeHtml(r.data.myRole)}</span>
+              <span style="margin-left:auto">成员 ${g.memberCount || 0} 人</span>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="secondary" onclick="location.hash='#guild/${g.id}'">查看公会</button>
+              ${r.data.myRole !== 'owner' ? `<button class="ghost danger-style" onclick="leaveGuild(${g.id})" style="color:#dc2626">退出公会</button>` : ''}
+            </div>
+          </div>`;
+      }
+    } catch {}
+  }
+
+  // 公会列表
+  try {
+    const r = await api.guilds.list();
+    const host = document.getElementById('guildsList');
+    if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+    const guilds = r.data || [];
+    if (guilds.length === 0) {
+      host.innerHTML = `<div class="card"><div class="hint">暂无公会。</div>${api.isLoggedIn() ? `<button onclick="showGuildCreateModal()" style="margin-top:8px">🎉 成为第一个建公会的人</button>` : ''}</div>`;
+      return;
+    }
+
+    host.innerHTML = `<div class="guild-grid">
+      ${guilds.map(g => `
+        <div class="guild-card" onclick="location.hash='#guild/${g.id}'">
+          <div class="guild-icon">${g.icon || '🏰'}</div>
+          <div class="guild-body">
+            <div class="guild-name">${escapeHtml(g.name)}</div>
+            <div class="guild-desc">${escapeHtml(g.description || '暂无简介')}</div>
+            <div class="guild-meta">👥 ${g.memberCount || 0} 人</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+  } catch (e) {
+    document.getElementById('guildsList').innerHTML = `❌ ${escapeHtml(e.message)}`;
+  }
+}
+
+// 显示"申请创建公会"弹窗
+window.showGuildCreateModal = function showGuildCreateModal() {
+  if (!api.isLoggedIn()) { alert('请先登录'); location.hash = 'login'; return; }
+  const html = `
+    <div class="modal-backdrop" onclick="if(event.target===this)document.getElementById('guildCreateModal').remove()">
+      <div class="modal" id="guildCreateModal" style="max-width:480px">
+        <h3 style="margin-top:0">📝 申请创建公会</h3>
+        <p class="hint">新公会需要管理员审批。审批通过后，您将成为公会创始者（Lv.owner）。</p>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div>
+            <label style="font-size:13px;color:#6b7280">公会图标（一个 emoji）</label>
+            <input id="gcIcon" maxlength="4" placeholder="🏰" value="🏰" style="width:60px;padding:6px;font-size:20px;text-align:center">
+          </div>
+          <div>
+            <label style="font-size:13px;color:#6b7280">公会名称（必填，最多 30 字）</label>
+            <input id="gcName" maxlength="30" placeholder="例如：广五数学社" style="width:100%">
+          </div>
+          <div>
+            <label style="font-size:13px;color:#6b7280">公会简介（最多 300 字）</label>
+            <textarea id="gcDesc" maxlength="300" rows="3" placeholder="介绍一下你的公会..." style="width:100%"></textarea>
+          </div>
+          <div>
+            <label style="font-size:13px;color:#6b7280">申请理由（最多 500 字）</label>
+            <textarea id="gcReason" maxlength="500" rows="2" placeholder="为什么想创建这个公会..." style="width:100%"></textarea>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+          <button class="secondary" onclick="document.getElementById('guildCreateModal').remove()">取消</button>
+          <button onclick="submitGuildCreate()">提交申请</button>
+        </div>
+      </div>
+    </div>`;
+  const existing = document.querySelector('.modal-backdrop');
+  if (existing) existing.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+};
+
+window.submitGuildCreate = async function submitGuildCreate() {
+  const name = document.getElementById('gcName').value.trim();
+  if (!name) { alert('请填写公会名称'); return; }
+  const payload = {
+    name,
+    description: document.getElementById('gcDesc').value.trim(),
+    icon: document.getElementById('gcIcon').value.trim() || '🏰',
+    reason: document.getElementById('gcReason').value.trim(),
+  };
+  try {
+    const r = await api.guilds.createRequest(payload);
+    if (r.success) {
+      document.querySelector('.modal-backdrop').remove();
+      alert('✅ 申请已提交，请等待管理员审批');
+    } else {
+      alert('提交失败：' + (r.message || '未知错误'));
+    }
+  } catch (e) {
+    alert('提交出错：' + e.message);
+  }
+};
+
+// 退出公会
+window.leaveGuild = async function leaveGuild(id) {
+  if (!confirm('确定退出该公会吗？')) return;
+  try {
+    const r = await api.guilds.leave(id);
+    if (r.success) { alert('✅ 已退出公会'); location.hash = 'guilds'; }
+    else alert('失败：' + (r.message || '未知错误'));
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+// ==================== 公会：详情页 ====================
+async function renderGuildDetail(app, id) {
+  if (!id || id <= 0) { location.hash = 'guilds'; return; }
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+
+  app.innerHTML = `
+    <div style="margin-bottom:10px">
+      <button class="ghost" onclick="location.hash='guilds'">← 返回公会列表</button>
+    </div>
+    <div id="guildDetailLoading">🔄 加载中...</div>
+  `;
+
+  try {
+    const r = await api.guilds.detail(id);
+    if (!r.success) {
+      document.getElementById('guildDetailLoading').innerHTML = `<div class="card">❌ ${escapeHtml(r.message)}</div>`;
+      return;
+    }
+    const g = r.data;
+    const members = g.members || [];
+
+    // 我的状态
+    let myRole = null;
+    if (api.isLoggedIn() && me) {
+      const m = members.find(x => x.uid === me.uid);
+      myRole = m ? m.role : null;
+    }
+    const isMember = !!myRole;
+    const myStatus = isMember
+      ? `<span class="level-badge">${myRole}</span>`
+      : `<button onclick="applyJoinGuild(${g.id})">📥 申请加入</button>`;
+    // 协助管理员：申请封禁该公会按钮（公会详情页）
+    const adminBanBtn = (me && me.role === 'admin' && g.status !== 'banned')
+      ? `<button class="secondary" onclick="openAdminRequestDialog({presetType:'ban_guild',presetTargetId:'${g.id}'})" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin-left:auto">🚫 申请封禁公会</button>`
+      : '';
+
+    const membersHtml = members.length === 0
+      ? `<span class="hint">暂无成员</span>`
+      : members.map(m => {
+          const u = { uid: m.uid, nickname: m.nickname, avatarUrl: m.avatarUrl };
+          const roleLabel = m.role === 'owner' ? '👑 创始' : m.role === 'admin' ? '🛡 管理' : '';
+          return `<div class="guild-member" onclick="location.hash='#user/${escapeHtml(m.uid)}'">
+            <span class="avatar-sm">${buildAvatarInner(u)}</span>
+            <span class="guild-member-name">${escapeHtml(m.nickname || `用户${m.uid}`)}</span>
+            ${roleLabel ? `<span style="font-size:11px;color:#6b7280">${roleLabel}</span>` : ''}
+          </div>`;
+        }).join('');
+    const guildIdBadge = `<span style="font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 6px;border-radius:4px" title="公会 ID">ID: #${g.id}</span>`;
+    const statusBadge = g.status === 'banned'
+      ? `<span style="font-size:11px;background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:10px">已封禁</span>`
+      : (g.status === 'active' ? '' : `<span style="font-size:11px;background:#e5e7eb;color:#374151;padding:2px 8px;border-radius:10px">${escapeHtml(g.status)}</span>`);
+
+    document.getElementById('guildDetailLoading').outerHTML = `
+      <div class="card guild-detail-header">
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="font-size:48px">${g.icon || '🏰'}</div>
+          <div style="flex:1">
+            <h2 style="margin:0">${escapeHtml(g.name)} ${statusBadge} ${guildIdBadge}</h2>
+            <div style="color:#6b7280;margin-top:4px">${escapeHtml(g.description || '暂无简介')}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:20px;font-weight:600">👥 ${g.memberCount || 0}</div>
+            <div style="font-size:12px;color:#6b7280">成员</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          ${myStatus}
+          ${isMember && myRole !== 'owner' ? `<button class="ghost danger-style" onclick="leaveGuild(${g.id})" style="color:#dc2626">退出公会</button>` : ''}
+          ${adminBanBtn}
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">👥 成员列表（${members.length}）</h3>
+        <div class="guild-member-list">${membersHtml}</div>
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById('guildDetailLoading').innerHTML = `<div class="card">❌ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// 申请加入公会
+window.applyJoinGuild = async function applyJoinGuild(id) {
+  if (!api.isLoggedIn()) { alert('请先登录'); location.hash = 'login'; return; }
+  const reason = prompt('申请理由（可选）', '');
+  try {
+    const r = await api.guilds.apply(id, reason);
+    if (r.success) alert('✅ 申请已提交，请等待审批');
+    else alert('申请失败：' + (r.message || '未知错误'));
+  } catch (e) { alert('出错：' + e.message); }
+};
+
+
+// ==================== 路由入口 ====================
+function route() {
+  const raw = (location.hash || '').slice(1);
+  // 先剥掉查询串（#forum?cat=study → forum?cat=study → forum），否则带筛选的 hash 会被当成未知路径落到封面页
+  const [pathPart, ...rest] = raw.split('?');
+  const [seg1, seg2] = pathPart.split('/');
+  const path = seg1 || 'home';
+  const app = document.getElementById('app');
+
+  if (path === 'login') renderLogin(app);
+  else if (path === 'register') renderRegister(app);
+  else if (path === 'post') renderPost(app);
+  else if (path === 'detail' && seg2) renderDetail(app, parseInt(seg2, 10));
+  else if (path === 'me') renderMe(app);
+  else if (path === 'exp') renderExp(app);
+  else if (path === 'notifications') renderNotifications(app);
+  else if (path === 'user' && seg2) renderUserProfile(app, seg2);
+  else if (path === 'messages') {
+    // 解析查询参数：messages?peer=UID&name=昵称
+    const qs = rest.join('?');
+    const qp = new URLSearchParams(qs);
+    const peerUid = qp.get('peer');
+    const peerName = qp.get('name');
+    renderMessages(app, peerUid, peerName);
+  }
+  else if (path === 'announcements') renderAnnouncements(app);
+  else if (path === 'faq') renderFaq(app);
+  else if (path === 'calendar') renderCalendar(app);
+  else if (path === 'about') renderAbout(app);
+  else if (path === 'admin') renderAdmin(app);
+  else if (path === 'admin-sub') renderAdminSub(app);
+  else if (path === 'guilds') renderGuilds(app);
+  else if (path === 'guild' && seg2) renderGuildDetail(app, parseInt(seg2, 10));
+  else if (path === 'forum') renderForum(app);
+  else renderCover(app);
+}
+window.route = route;
+
+window.addEventListener('hashchange', () => { route(); refreshDrawerActive(); });
+window.addEventListener('load', async () => {
+  // 静默刷新登录态
+  if (api.getToken()) {
+    try { await api.auth.me(); } catch {}
+  }
+  await renderTopBar();
+  route();
+  // 悬浮反馈球
+  ensureFeedbackWidget();
+  // 绑定汉堡按钮 + 遮罩点击
+  const mt = document.getElementById('menuToggle');
+  const dc = document.getElementById('drawerClose');
+  const ov = document.getElementById('drawerOverlay');
+  if (mt) mt.addEventListener('click', openDrawer);
+  if (dc) dc.addEventListener('click', closeDrawer);
+  if (ov) ov.addEventListener('click', closeDrawer);
+  // 登录后拉未读公告弹窗（异步，不阻塞渲染）
+  popupUnreadAnnouncements();
+  // 每 60 秒刷新一次未读消息数（顶栏红点）
+  setInterval(() => { if (api.isLoggedIn()) renderTopBar(); }, 60 * 1000);
+});
+function refreshDrawerActive() {
+  const drawerNav = document.getElementById('drawerNav');
+  if (!drawerNav) return;
+  const cur = (location.hash || '').split('?')[0].slice(1) || 'home';
+  drawerNav.querySelectorAll('a').forEach(a => {
+    const href = (a.getAttribute('href') || '').replace(/^#/, '').split('?')[0];
+    a.classList.toggle('active', href === cur);
+  });
+}
