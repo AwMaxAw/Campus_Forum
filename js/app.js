@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260911-admin-sub';
+import * as api from './api.js?v=20260830-admin-auth-fix';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -4367,7 +4367,7 @@ window.openAdminRequestDialog = function openAdminRequestDialog({ presetType, pr
   mask.className = 'modal-mask';
   mask.innerHTML = `
     <div class="modal-box" style="max-width:480px">
-      <div style="font-weight:600;font-size:16px;margin-bottom:12px;color:#1d4ed8">📝 提交管理员申请</div>
+      <div style="font-weight:600;font-size:16px;margin-bottom:12px;color:#1d4ed8">📝 提交申请</div>
       <div style="margin-bottom:12px">
         <label class="lbl">申请类型</label>
         <select id="arType" class="input">
@@ -4379,8 +4379,8 @@ window.openAdminRequestDialog = function openAdminRequestDialog({ presetType, pr
         <input id="arTarget" class="input" placeholder="..." />
       </div>
       <div style="margin-bottom:12px">
-        <label class="lbl">申请理由（10~500 字）</label>
-        <textarea id="arReason" class="input" rows="4" placeholder="请说明原因，便于运维管理员审核"></textarea>
+        <label class="lbl">申请理由（必填）</label>
+        <textarea id="arReason" class="input" rows="4" placeholder="请填写理由"></textarea>
       </div>
       <div id="arErr" style="color:#dc2626;font-size:12px;margin-bottom:8px;min-height:1em"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
@@ -4411,13 +4411,12 @@ window.openAdminRequestDialog = function openAdminRequestDialog({ presetType, pr
     const reason = reasonInput.value.trim();
     errEl.textContent = '';
     if (!targetId) { errEl.textContent = '请输入目标编号 / UID / ID'; return; }
-    if (reason.length < 5) { errEl.textContent = '理由至少 5 个字'; return; }
-    if (reason.length > 500) { errEl.textContent = '理由不能超过 500 字'; return; }
+    if (!reason) { errEl.textContent = '请填写申请理由'; return; }
     try {
       const r = await api.adminRequests.create({ type, targetId, reason });
       if (r && r.success) {
         mask.remove();
-        alert('✅ 申请已提交，等待运维管理员处理');
+        alert('✅ 申请已提交');
         if (typeof onSuccess === 'function') onSuccess(r.data);
       } else {
         errEl.textContent = (r && r.message) || '提交失败';
@@ -4542,7 +4541,7 @@ async function renderAdminSub(app) {
     if (!reason) { alert('请填写申请理由'); return; }
     const r = await api.adminRequests.create({ type, targetId: tid, reason });
     if (r && r.success) {
-      alert('✅ 申请已提交，等待运维管理员处理');
+      alert('✅ 申请已提交');
       renderAdminSub(document.getElementById('app'));
     } else {
       alert('❌ ' + ((r && r.message) || '提交失败'));

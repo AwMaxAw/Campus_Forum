@@ -622,36 +622,46 @@ export const admin = {
 };
 
 // ======================== 管理员协助申请 ========================
+// 统一确保登录态：打开弹窗到提交之间若路由变化触发了 clearAuth，仍从 localStorage 兜底再读一次
+function _ensureAdminAuth() {
+  if (!tokenCache) try {
+    const t = localStorage.getItem(TOKEN_KEY);
+    const u = localStorage.getItem(USER_KEY);
+    if (t && u) { tokenCache = t; userCache = JSON.parse(u); }
+  } catch {}
+  if (!tokenCache) return { ok: false, err: '请先登录' };
+  return { ok: true };
+}
 export const adminRequests = {
   /** 创建申请（admin / ops_admin） */
   async create({ type, targetId, reason }) {
-    if (!tokenCache) return { success: false, message: '请先登录' };
+    const a = _ensureAdminAuth(); if (!a.ok) return { success: false, message: a.err };
     return request('/api/admin-requests', { method: 'POST', body: { type, targetId, reason } });
   },
   /** 我提交的申请列表（含 pending + 历史） */
   async mine() {
-    if (!tokenCache) return { success: false, message: '请先登录' };
+    const a = _ensureAdminAuth(); if (!a.ok) return { success: false, message: a.err };
     return request('/api/admin-requests/mine');
   },
   /** ops_admin 待审批列表 */
   async pending() {
-    if (!tokenCache) return { success: false, message: '请先登录' };
+    const a = _ensureAdminAuth(); if (!a.ok) return { success: false, message: a.err };
     return request('/api/admin-requests/pending');
   },
   /** 历史申请 */
   async history() {
-    if (!tokenCache) return { success: false, message: '请先登录' };
+    const a = _ensureAdminAuth(); if (!a.ok) return { success: false, message: a.err };
     return request('/api/admin-requests/history');
   },
   /** 审批通过并执行 */
   async approve(id, note) {
-    if (!tokenCache) return { success: false, message: '请先登录' };
+    const a = _ensureAdminAuth(); if (!a.ok) return { success: false, message: a.err };
     if (!id) return { success: false, message: '缺少申请 id' };
     return request(`/api/admin-requests/${id}/approve`, { method: 'POST', body: { note: note || '' } });
   },
   /** 审批拒绝 */
   async reject(id, note) {
-    if (!tokenCache) return { success: false, message: '请先登录' };
+    const a = _ensureAdminAuth(); if (!a.ok) return { success: false, message: a.err };
     if (!id) return { success: false, message: '缺少申请 id' };
     return request(`/api/admin-requests/${id}/reject`, { method: 'POST', body: { note: note || '' } });
   },
