@@ -4485,6 +4485,63 @@ async function renderAdminSub(app) {
       <span style="font-size:12px;color:#6b7280">身份：${roleLabel}（${escapeHtml(me.uid)}）</span>
     </div>
 
+    <!-- 管理员守则（顶部折叠卡，默认展开以便查看） -->
+    <details class="card" style="margin-bottom:16px;border-left:4px solid #f59e0b;background:#fffdf7" open>
+      <summary style="cursor:pointer;font-weight:600;color:#b45309;list-style:none;padding:6px 2px;user-select:none;display:flex;align-items:center;gap:8px">
+        <span>📜 管理员守则（工作前请先阅读）</span>
+        <span style="margin-left:auto;font-weight:400;font-size:12px;color:#9ca3af">点击可折叠 / 展开</span>
+      </summary>
+      <div style="margin-top:14px;padding:0 6px;color:#1f2937;line-height:1.85;font-size:14px">
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">一、角色与权限边界</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>你是<b>协助管理员</b>（下称"管理员"），可在论坛内进行合规巡查、协助管理。</li>
+          <li>你<b>不拥有直接删除 / 直接封禁</b>的权限；所有处理动作都需要先提交申请，通过后才会执行。</li>
+          <li>你只能操作和查看 <b>广五本部高中部（2612）分区</b> 的内容，不得越权介入其他分区事务。</li>
+          <li>遇到拿不准的情况，<b>先观望或上报</b>，不要用私人情绪代作判断。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">二、申请删除帖子 / 评论时要注意</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>每条内容的<b>编号</b>显示在右下角或头部，如"#14"；填编号时只需写<b>数字部分</b>（例如 14），不要带井号。</li>
+          <li>删除判断依据（满足任一即可申请）：①违规违法；②辱骂/人身攻击；③泄露他人隐私；④广告/刷单/引流；⑤恶意引战、刷屏灌水；⑥与分区主题严重不符。</li>
+          <li>若在帖子详情页 / 评论区看到违规内容，可直接点卡片上的 <b>「📝 申请删除」</b> 按钮——编号会自动预填，只需写理由。</li>
+          <li>理由虽然"随便写一两个字也行"，但<b>建议写清楚关键信息</b>（如"第 3 楼辱骂楼主"、"含赌博广告链接"），便于判断与归档。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">三、申请封禁用户 / 公会时要注意</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li><b>封禁用户</b>：目标是用户 UID（8 位数字，如 26110101）；可在用户主页头像旁、私信列表、帖子作者信息里找到。</li>
+          <li><b>封禁公会</b>：目标是公会 ID（在公会详情页标题旁可见，如 ID: #1）。</li>
+          <li>严禁因个人恩怨 / 私人关系申请封禁；<b>严禁</b>封禁 00000001 账号（运维管理员），系统会自动拦截。</li>
+          <li>用户主页 / 公会详情页也有<b>「🚫 申请封禁」</b>按钮，点进去会自动带上 UID / ID。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">四、申请进度与结果</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>提交的所有申请都会出现在下方 <b>「⏳ 待通过 / 已申请待处理」</b>，可以随时看到处理状态。</li>
+          <li>申请被处理后会出现在 <b>「✅ 已执行 / 历史处理」</b>，包含处理结果与说明。</li>
+          <li>相同目标、相同类型的待处理申请<b>不能重复提交</b>，系统会自动拦截。</li>
+          <li>若发现<b>申请被拒绝</b>，先查看"审批备注"；再遇到相同场景请调整判断标准。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">五、管理员言行 & 行为规范</h3>
+        <ul style="margin:4px 0 14px 0;padding-left:22px">
+          <li>管理员身份是一种信任，请保持在站内言论友善、客观；<b>不要用管理员身份压人、站队或带节奏</b>。</li>
+          <li>与普通用户发生争议时，<b>自动回避</b>：不要处理涉及自己 / 自己朋友的申请，交由其他管理员或运维管理员处理。</li>
+          <li>不得泄露申请记录里的敏感信息（如申请人 UID、审批备注、被举报人细节）。</li>
+          <li>账号与密码 <b>仅限本人使用</b>，禁止转借；若怀疑密码外泄请立即自行修改并告知运维管理员。</li>
+        </ul>
+
+        <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">六、快速上手 Checklist</h3>
+        <div style="padding:10px 14px;background:#fff7ed;border-radius:6px;border:1px dashed #fcd34d">
+          1️⃣ 浏览广场 → 发现违规 → 记下帖子/评论 <b>编号</b> 或直接点详情页按钮 → 写理由 → 提交<br>
+          2️⃣ 发现有用户/公会严重违规 → 点进主页的 <b>申请封禁</b> → 写理由 → 提交<br>
+          3️⃣ 回到本面板下方查看处理结果；被拒绝就看备注、调整判断标准<br>
+          4️⃣ 有争议 / 拿不准 → <b>先不处理</b>，私信 <b>00000001（运维管理员）</b> 汇报，对话在私信列表顶部常驻
+        </div>
+      </div>
+    </details>
+
     <!-- 申请板块 1：删除帖子 / 删除评论 -->
     <div class="card" style="margin-bottom:16px">
       <div style="font-weight:600;margin-bottom:10px;color:#2563eb">🗑 删除内容申请（帖子 / 评论）</div>
