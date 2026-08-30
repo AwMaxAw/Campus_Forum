@@ -1134,7 +1134,8 @@ async function renderForum(app) {
     };
     const res = await api.posts.list(1, 50, postFilters);
     if (!res.success) {
-      listEl.outerHTML = `<div class="card">❌ 加载失败：${escapeHtml(res.message)}</div>`;
+      // 保留 id="postList" 容器（避免后续 setForumView 找不到元素）
+      listEl.outerHTML = `<div id="postList" class="card">❌ 加载失败：${escapeHtml(res.message)}</div>`;
       return;
     }
     const data = res.data || [];
@@ -1174,7 +1175,8 @@ async function renderForum(app) {
     }
 
     if (data.length === 0) {
-      listEl.outerHTML = `<div class="empty">${hasFilter ? '😶 没有匹配的帖子，试试 🔎 清除条件 重新搜索～' : '还没有帖子，快来发第一条吧'}</div>`;
+      // 保留 id="postList" 容器（避免后续 setForumView 找不到元素）
+      listEl.outerHTML = `<div id="postList" class="empty">${hasFilter ? '😶 没有匹配的帖子，试试 🔎 清除条件 重新搜索～' : '还没有帖子，快来发第一条吧'}</div>`;
       return;
     }
     // 分置顶帖和普通帖：搜索筛选态不再单独置顶折叠区，按排序直接混排
@@ -1183,6 +1185,7 @@ async function renderForum(app) {
 
     // 缓存供视图切换使用
     _lastForumPostsCache = data;
+    window._lastForumIsFiltered = !!hasFilter;
 
     const viewMode = getForumViewMode();
     let html = '';
@@ -1223,7 +1226,7 @@ async function renderForum(app) {
     if (cardsBtn) cardsBtn.classList.toggle('active', viewMode === 'cards');
     if (listBtn)  listBtn.classList.toggle('active', viewMode === 'list');
   } catch (e) {
-    listEl.outerHTML = `<div class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
+    listEl.outerHTML = `<div id="postList" class="card">❌ 网络错误：${escapeHtml(e.message)}</div>`;
   }
 
   // 确保用户搜索 Promise 不抛未处理异常（用户搜索渲染自己处理异常）
@@ -1248,21 +1251,40 @@ function setForumView(mode) {
   if (cardsBtn) cardsBtn.classList.toggle('active', mode === 'cards');
   if (listBtn)  listBtn.classList.toggle('active', mode === 'list');
 
-  const view = document.getElementById('postList');
-  if (!view) return;
+  let view = document.getElementById('postList');
+  // 兜底：容器被 outerHTML 替换销毁了 → 先重建一个再继续
+  if (!view) {
+    const anchor = document.getElementById('postCount') || document.getElementById('listTitle');
+    const host = anchor ? anchor.parentElement : document.getElementById('app');
+    if (!host) return;
+    const rebuilt = document.createElement('div');
+    rebuilt.id = 'postList';
+    // 尽量插到合理位置：anchor 之后
+    if (anchor && anchor.nextSibling) anchor.parentNode.insertBefore(rebuilt, anchor.nextSibling);
+    else if (anchor) anchor.parentNode.appendChild(rebuilt);
+    else host.appendChild(rebuilt);
+    view = rebuilt;
+  }
 
   // 用缓存的数据，纯同步 DOM 替换
   const posts = _lastForumPostsCache;
+  const isFiltered = !!window._lastForumIsFiltered;
   if (!Array.isArray(posts) || posts.length === 0) {
-    // 没缓存？那就重新渲染整个广场页面
+    // 没缓存？那就重新渲染整个广场页面（会按当前 localStorage 的 mode 重画）
     const app = document.getElementById('app');
     if (app) renderForum(app);
     return;
   }
 
-  // 先把当前 postList 里的所有卡片 data-post-id 收集一遍兜底
-  const pinnedPosts = posts.filter(p => p.isPinned);
-  const normalPosts = posts.filter(p => !p.isPinned);
+  // 筛选状态：置顶不再单独折叠区，直接按现有顺序混排
+  let pinnedPosts, normalPosts;
+  if (isFiltered) {
+    pinnedPosts = [];
+    normalPosts = posts.slice();
+  } else {
+    pinnedPosts = posts.filter(p => p.isPinned);
+    normalPosts = posts.filter(p => !p.isPinned);
+  }
 
   let html = '';
   if (mode === 'cards') {
@@ -1291,6 +1313,11 @@ function setForumView(mode) {
     bindPinnedEvents();
   }
   view.innerHTML = html;
+  // 保险：再刷一次按钮激活态（某些场景 renderForum 之后会被覆盖）
+  const cardsBtn2 = document.getElementById('viewModeCards');
+  const listBtn2  = document.getElementById('viewModeList');
+  if (cardsBtn2) cardsBtn2.classList.toggle('active', mode === 'cards');
+  if (listBtn2)  listBtn2.classList.toggle('active', mode === 'list');
 }
 // 暴露到 window，让内联 onclick 能找到（ES Module 顶层 function 不自动挂 window）
 window.getForumViewMode = getForumViewMode;
