@@ -158,10 +158,22 @@ images.get('/:id', async (c) => {
     return new Response(null, { status: 304, headers: { ETag: etag } });
   }
 
-  return new Response(row.data, {
+  // D1 返回的 BLOB 可能是 ArrayBuffer、Uint8Array 或其他类型，统一转成 Uint8Array 二进制
+  let binaryData = row.data;
+  if (binaryData instanceof ArrayBuffer) {
+    binaryData = new Uint8Array(binaryData);
+  } else if (Array.isArray(binaryData)) {
+    // D1 有时把 BLOB 返回为普通数组 [255, 216, ...]
+    binaryData = new Uint8Array(binaryData);
+  } else if (typeof binaryData === 'string') {
+    // 最坏情况：逗号分隔的数字字符串 "255,216,..."
+    binaryData = new Uint8Array(binaryData.split(',').map(Number));
+  }
+
+  return new Response(binaryData, {
     headers: {
       'Content-Type': row.mime_type,
-      'Content-Length': String(row.size),
+      'Content-Length': String(binaryData.length),
       'Cache-Control': 'public, max-age=86400',
       'ETag': etag,
       'Access-Control-Allow-Origin': '*',
