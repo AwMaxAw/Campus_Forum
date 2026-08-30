@@ -4494,7 +4494,7 @@ async function renderAdminSub(app) {
       <div style="margin-top:14px;padding:0 6px;color:#1f2937;line-height:1.85;font-size:14px">
         <h3 style="margin:0 0 8px 0;font-size:15px;color:#92400e;border-bottom:1px dashed #fde68a;padding-bottom:6px">一、角色与权限边界</h3>
         <ul style="margin:4px 0 14px 0;padding-left:22px">
-          <li>你是<b>协助管理员</b>（下称"管理员"），可在论坛内进行合规巡查、协助删除等管理工作。</li>
+          <li>你是管理员（下称"管理员"），可在论坛内进行合规巡查、删除等管理工作。</li>
           <li>你只能操作和查看 <b>广五本部高中部（2612）分区</b> 的内容，不得越权介入其他分区事务。</li>
         </ul>
 
