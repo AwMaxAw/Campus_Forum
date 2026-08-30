@@ -88,6 +88,27 @@ app.route('/api/checkin', checkinRoutes);
 app.route('/api/guilds', guildsRoutes);
 app.route('/api/admin-requests', adminRequestsRoutes);
 
+// ==================== 运维管理员：手动触发一次帖子备份到 GitHub（调试入口） ====================
+app.post('/api/admin/backup-posts-now', async (c) => {
+  // JWT 校验：仅 ops_admin
+  try {
+    const jwtMw = (await import('hono/jwt')).jwt({ secret: c.env.JWT_SECRET, alg: 'HS256' });
+    await jwtMw(c, async () => {});
+  } catch {
+    return c.json({ success: false, message: '需要登录' }, 401);
+  }
+  const payload = c.get && c.get('jwtPayload');
+  if (!payload || payload.role !== 'ops_admin') {
+    return c.json({ success: false, message: '仅运维管理员可手动触发备份' }, 403);
+  }
+  try {
+    const r = await runBackup(c.env);
+    return c.json({ success: true, data: r });
+  } catch (e) {
+    return c.json({ success: false, message: `[backup-posts-now] ${e.name}: ${e.message}` }, 500);
+  }
+});
+
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
 let autoMigrated = false;
@@ -357,4 +378,189 @@ app.notFound((c) => {
   );
 });
 
-export default app;
+// ================================================================
+// 每天 0 点（北京时间）自动备份所有帖子 → GitHub 仓库 backup/posts/
+//   - Cloudflare Workers Cron Trigger：scheduled 事件
+//   - wrangler.toml: crons = ["0 16 * * *"]   (UTC 16:00 = Beijing 00:00)
+//   - 需要环境变量（secret）：GITHUB_PAT、BACKUP_REPO(可选，默认 AwMaxAw/Campus_Forum)、BACKUP_BRANCH(可选，默认 main)
+// ================================================================
+
+/**
+ * 从 D1 导出所有帖子（含作者昵称、评论、是否置顶/隐藏、图片id等）+ 基础统计信息，
+ * 返回 { meta, posts } 结构。
+ */
+async function dumpPostsForBackup(db) {
+  // 所有帖子（含被隐藏/置顶的，完整状态）
+  const postsRaw = await db.prepare(`
+    SELECT p.id, p.title, p.content, p.tags, p.category, p.region, p.image_ids,
+           p.is_pinned, p.pin_order, p.is_hidden, p.view_count, p.like_count, p.comment_count,
+           p.author_uid, u.nickname AS author_nickname, u.role AS author_role,
+           p.created_at, p.updated_at
+    FROM posts p
+    LEFT JOIN users u ON u.uid = p.author_uid
+    ORDER BY p.id ASC
+  `).all();
+  const posts = postsRaw.results || [];
+
+  // 所有评论（扁平）
+  const commentsRaw = await db.prepare(`
+    SELECT c.id, c.post_id, c.author_uid, u.nickname AS author_nickname,
+           c.content, c.reply_to_id, c.is_hidden, c.created_at
+    FROM comments c
+    LEFT JOIN users u ON u.uid = c.author_uid
+    ORDER BY c.post_id ASC, c.id ASC
+  `).all();
+  const comments = commentsRaw.results || [];
+
+  // 按 post_id 分组成 Map<postId, comments[]>
+  const commentsByPost = new Map();
+  for (const c of comments) {
+    const arr = commentsByPost.get(c.post_id) || [];
+    arr.push(c);
+    commentsByPost.set(c.post_id, arr);
+  }
+
+  // 解析 image_ids 并拼 comments
+  const finalPosts = posts.map(p => {
+    let imageIds = [];
+    try {
+      if (p.image_ids) {
+        const parsed = JSON.parse(p.image_ids);
+        if (Array.isArray(parsed)) imageIds = parsed.map(Number).filter(n => Number.isFinite(n));
+      }
+    } catch {}
+    return {
+      id: p.id,
+      title: p.title,
+      content: p.content,
+      tags: (p.tags || '').split(',').map(s => s.trim()).filter(Boolean),
+      category: p.category,
+      region: p.region || null,
+      imageIds,
+      isPinned: !!p.is_pinned,
+      pinOrder: p.pin_order || 0,
+      isHidden: !!p.is_hidden,
+      stats: {
+        views: p.view_count || 0,
+        likes: p.like_count || 0,
+        comments: p.comment_count || 0,
+      },
+      author: {
+        uid: p.author_uid,
+        nickname: p.author_nickname || null,
+        role: p.author_role || 'member',
+      },
+      comments: commentsByPost.get(p.id) || [],
+      createdAt: p.created_at,
+      updatedAt: p.updated_at,
+    };
+  });
+
+  // 统计信息（备份的元数据）
+  const stats = {
+    totalPosts: finalPosts.length,
+    visiblePosts: finalPosts.filter(p => !p.isHidden).length,
+    hiddenPosts: finalPosts.filter(p => p.isHidden).length,
+    pinnedPosts: finalPosts.filter(p => p.isPinned).length,
+    totalComments: comments.length,
+    postsWithImages: finalPosts.filter(p => p.imageIds.length > 0).length,
+    byCategory: {},
+  };
+  for (const p of finalPosts) {
+    stats.byCategory[p.category || 'unknown'] = (stats.byCategory[p.category || 'unknown'] || 0) + 1;
+  }
+
+  return {
+    meta: {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      source: 'campus-forum-worker-d1',
+      stats,
+    },
+    posts: finalPosts,
+  };
+}
+
+/**
+ * 通过 GitHub Contents REST API 把备份 JSON 写到仓库 backup/posts/posts-YYYYMMDD.json
+ *   PUT /repos/:owner/:repo/contents/:path
+ *   每次备份都是新建一个新文件（文件名带日期），无需 SHA，不会覆盖旧的。
+ */
+async function pushBackupToGithub({ env, filename, contentStr }) {
+  const pat = env.GITHUB_PAT;
+  if (!pat) throw new Error('GITHUB_PAT 环境变量未设置');
+
+  const repo = env.BACKUP_REPO || 'AwMaxAw/Campus_Forum';
+  const branch = env.BACKUP_BRANCH || 'main';
+  const path = `backup/posts/${filename}`;
+  const url = `https://api.github.com/repos/${repo}/contents/${path}`;
+
+  const today = new Date();
+  const beijing = new Date(today.getTime() + 8 * 3600 * 1000);
+  const dateStr = beijing.toISOString().slice(0, 10);
+  const postCountMatch = contentStr.match(/"totalPosts"\s*:\s*(\d+)/);
+  const postCount = postCountMatch ? Number(postCountMatch[1]) : 0;
+
+  const base64 = btoa(unescape(encodeURIComponent(contentStr)));
+  const body = {
+    message: `backup: 帖子每日快照 ${dateStr}（${postCount} 篇）`,
+    content: base64,
+    branch,
+  };
+
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${pat}`,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'campus-forum-worker-backup/1.0',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`GitHub API ${res.status}: ${JSON.stringify(data)}`);
+  }
+  return data;
+}
+
+/** 执行一次完整备份（scheduled 事件和手动 HTTP 调试入口共用） */
+async function runBackup(env) {
+  if (!env.DB) throw new Error('DB binding missing');
+  const payload = await dumpPostsForBackup(env.DB);
+  const content = JSON.stringify(payload, null, 2);
+
+  // 文件名：posts-YYYYMMDD.json（北京时间日期）
+  const now = new Date(Date.now() + 8 * 3600 * 1000); // Beijing
+  const yyyy = now.getUTCFullYear();
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(now.getUTCDate()).padStart(2, '0');
+  const filename = `posts-${yyyy}${mm}${dd}.json`;
+
+  const ghRes = await pushBackupToGithub({ env, filename, contentStr: content });
+
+  return {
+    filename,
+    postCount: payload.meta.stats.totalPosts,
+    commentCount: payload.meta.stats.totalComments,
+    github: ghRes && ghRes.content ? { path: ghRes.content.path, sha: ghRes.content.sha, htmlUrl: ghRes.content.html_url } : null,
+  };
+}
+
+// Cron Trigger 入口（Cloudflare Workers 标准 API：{ fetch, scheduled }）
+export default {
+  fetch: app.fetch,
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        const r = await runBackup(env);
+        console.log('[cron backup] OK', JSON.stringify(r));
+      } catch (e) {
+        console.error('[cron backup] FAIL', e && e.stack || e);
+        throw e; // 触发 Cloudflare 内置失败告警（有配置的话）
+      }
+    })());
+  },
+};

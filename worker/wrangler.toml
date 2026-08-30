@@ -25,3 +25,15 @@ id = "cdaa4fa54781457ca5b01afd8fcc83c8"
 # [[r2_buckets]]
 # binding = "POST_IMAGES"
 # bucket_name = "campus-forum-post-images"
+
+# ================================================================
+# 定时触发器：每天北京时间 00:00 自动备份帖子到 GitHub
+#   UTC 16:00 = Beijing 00:00 (UTC+8)
+#   使用说明：
+#     1) CLOUDFLARE_API_TOKEN=xxx npx wrangler deploy     # 必须先 deploy 一次让 cron 注册到平台
+#     2) CLOUDFLARE_API_TOKEN=xxx npx wrangler secret put GITHUB_PAT      # 交互式输入 GitHub Personal Access Token (需要 Contents read/write 权限)
+#     3) 可选 secret:  BACKUP_REPO（默认 AwMaxAw/Campus_Forum）、BACKUP_BRANCH（默认 main）
+#     4) 立即测试:  CLOUDFLARE_API_TOKEN=xxx npx wrangler dev --remote  然后浏览器 POST /api/admin/backup-posts-now (ops_admin JWT 头)
+# ================================================================
+[triggers]
+crons = ["0 16 * * *"]
