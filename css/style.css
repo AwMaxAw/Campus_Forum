@@ -534,6 +534,25 @@ button.active-fav { background: #ffcc00; color: #1d1d1f; }
 .avatar-xs .avatar-initials { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 .avatar-xs .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
+/* ---- 通用 avatar-small 别名（兼容写错的情况，等价于 avatar-sm 28px）---- */
+.avatar-small {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: #fff; display: inline-flex; align-items: center; justify-content: center;
+  color: #0071e3; font-weight: 700; font-size: 13px; flex-shrink: 0;
+  overflow: hidden; position: relative;
+}
+.avatar-small .avatar-initials { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.avatar-small .avatar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* ---- 运维管理员面板账号表格头像（最小 22px，不撑高行高）---- */
+.admin-table .admin-avatar,
+.admin-table td:first-child .avatar,
+.admin-table td:first-child .avatar-xs,
+.admin-table td:first-child .avatar-small {
+  width: 22px !important; height: 22px !important; font-size: 10px !important;
+  display: inline-flex !important; margin: 0 !important;
+}
+
 /* ---- 等级徽章（帖子卡 + 评论区通用）---- */
 .level-badge {
   font-size: 10px; font-weight: 700; color: #fff;

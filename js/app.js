@@ -3986,11 +3986,11 @@ function buildUserRow(u, myUid, myRole) {
     ? `${guildBadge(u)}`
     : `<span class="hint" style="margin:0">没有</span>`;
 
-  // 头像（优先真实图，否则首字母占位）
+  // 头像（admin 表格专用：超小号 22px，避免撑高行导致排版乱）
   const avatarUrl = api.getAvatarUrl(u);
   const initial = ((u.nickname || u.uid) || '?').slice(0, 1).toUpperCase();
-  const avatarCell = `<a href="#user/${escapeHtml(u.uid)}" style="text-decoration:none"><div class="avatar avatar-small" title="${escapeHtml(u.nickname || u.uid)}">
-    <span class="avatar-initials">${escapeHtml(initial)}</span>
+  const avatarCell = `<a href="#user/${escapeHtml(u.uid)}" style="text-decoration:none;display:inline-flex"><div class="admin-avatar avatar-xs" style="width:22px;height:22px;font-size:10px" title="${escapeHtml(u.nickname || u.uid)}">
+    <span class="avatar-initials" style="font-size:10px">${escapeHtml(initial)}</span>
     ${avatarUrl ? `<img class="avatar-img" src="${escapeHtml(avatarUrl)}" alt="头像" onerror="this.style.display='none'">` : ''}
   </div></a>`;
 
