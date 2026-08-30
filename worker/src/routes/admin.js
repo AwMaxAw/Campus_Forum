@@ -164,29 +164,52 @@ admin.delete('/users/:uid', requireAdmin(), async (c) => {
       return fail('运维管理员账号不可被注销', 403);
     }
 
-    // 物理删除：连带清理所有关联数据（按外键依赖顺序从叶子到根删除）
-    const stmts = [
-      // 用户主动行为（引用 users 或 posts）
-      db.prepare('DELETE FROM post_likes WHERE uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM favorites WHERE uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM messages WHERE from_uid = ? OR to_uid = ?').bind(targetUid, targetUid),
-      db.prepare('DELETE FROM announcements_read WHERE uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM notifications WHERE uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM check_ins WHERE uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM feedbacks WHERE author_uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM guild_create_requests WHERE requester_uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM admin_requests WHERE requester_uid = ? OR reviewer_uid = ?').bind(targetUid, targetUid),
-      // 帖子相关 —— 先删图片、评论，再删帖子
-      db.prepare('DELETE FROM images WHERE author_uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM comments WHERE author_uid = ?').bind(targetUid),
-      db.prepare('DELETE FROM posts WHERE author_uid = ?').bind(targetUid),
-      // 公告
-      db.prepare('DELETE FROM announcements WHERE author_uid = ?').bind(targetUid),
-      // 公会 owner 清空（避免 users 外键冲突）
-      db.prepare('UPDATE guilds SET owner_uid = NULL WHERE owner_uid = ?').bind(targetUid),
-      // 最后删用户（guild_members/guild_join_requests 有 ON DELETE CASCADE 会自动清）
-      db.prepare('DELETE FROM users WHERE uid = ?').bind(targetUid),
-    ];
+    // 先查出该用户发的帖子、公告 ID —— 必须用这些 ID 级联清理所有引用它们的数据
+    const myPostIds = await db.prepare('SELECT id FROM posts WHERE author_uid = ?').bind(targetUid).all();
+    const postIdList = (myPostIds.results || []).map(r => r.id);
+    const myAnnIds = await db.prepare('SELECT id FROM announcements WHERE author_uid = ?').bind(targetUid).all();
+    const annIdList = (myAnnIds.results || []).map(r => r.id);
+
+    const stmts = [];
+
+    // === 1. 清理"引用了该用户发的帖子"的所有数据（不论是谁点的赞/收藏/评论/上传的图）===
+    if (postIdList.length > 0) {
+      const ph = postIdList.map(() => '?').join(',');
+      stmts.push(db.prepare(`DELETE FROM post_likes WHERE post_id IN (${ph})`).bind(...postIdList));
+      stmts.push(db.prepare(`DELETE FROM favorites WHERE post_id IN (${ph})`).bind(...postIdList));
+      stmts.push(db.prepare(`DELETE FROM images WHERE post_id IN (${ph})`).bind(...postIdList));
+      stmts.push(db.prepare(`DELETE FROM comments WHERE post_id IN (${ph})`).bind(...postIdList));
+      stmts.push(db.prepare(`DELETE FROM posts WHERE id IN (${ph})`).bind(...postIdList));
+    }
+
+    // === 2. 清理"引用了该用户发的公告"的所有已读记录 ===
+    if (annIdList.length > 0) {
+      const ph = annIdList.map(() => '?').join(',');
+      stmts.push(db.prepare(`DELETE FROM announcements_read WHERE announcement_id IN (${ph})`).bind(...annIdList));
+      stmts.push(db.prepare(`DELETE FROM announcements WHERE id IN (${ph})`).bind(...annIdList));
+    }
+
+    // === 3. 清理该用户自己作为 author_uid 的图片/评论（他评论过别人的帖、传过无归属的图）===
+    stmts.push(db.prepare('DELETE FROM images WHERE author_uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM comments WHERE author_uid = ?').bind(targetUid));
+
+    // === 4. 清理其他直接引用 users(uid) 的数据 ===
+    stmts.push(db.prepare('DELETE FROM post_likes WHERE uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM favorites WHERE uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM messages WHERE from_uid = ? OR to_uid = ?').bind(targetUid, targetUid));
+    stmts.push(db.prepare('DELETE FROM announcements_read WHERE uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM notifications WHERE uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM check_ins WHERE uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM feedbacks WHERE author_uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM guild_create_requests WHERE requester_uid = ?').bind(targetUid));
+    stmts.push(db.prepare('DELETE FROM admin_requests WHERE requester_uid = ? OR reviewer_uid = ?').bind(targetUid, targetUid));
+
+    // === 5. 公会 owner 置空（guilds.owner_uid REFERENCES users(uid)）===
+    stmts.push(db.prepare('UPDATE guilds SET owner_uid = NULL WHERE owner_uid = ?').bind(targetUid));
+
+    // === 6. 最后删 users ===
+    stmts.push(db.prepare('DELETE FROM users WHERE uid = ?').bind(targetUid));
+
     await db.batch(stmts);
     return c.json(ok({ uid: targetUid, deleted: true }));
   } catch (e) {
