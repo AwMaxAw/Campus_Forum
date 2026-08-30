@@ -164,15 +164,27 @@ admin.delete('/users/:uid', requireAdmin(), async (c) => {
       return fail('运维管理员账号不可被注销', 403);
     }
 
-    // 物理删除：连带清理所有关联数据
+    // 物理删除：连带清理所有关联数据（按外键依赖顺序从叶子到根删除）
     const stmts = [
+      // 用户主动行为（引用 users 或 posts）
       db.prepare('DELETE FROM post_likes WHERE uid = ?').bind(targetUid),
       db.prepare('DELETE FROM favorites WHERE uid = ?').bind(targetUid),
       db.prepare('DELETE FROM messages WHERE from_uid = ? OR to_uid = ?').bind(targetUid, targetUid),
       db.prepare('DELETE FROM announcements_read WHERE uid = ?').bind(targetUid),
+      db.prepare('DELETE FROM notifications WHERE uid = ?').bind(targetUid),
+      db.prepare('DELETE FROM check_ins WHERE uid = ?').bind(targetUid),
+      db.prepare('DELETE FROM feedbacks WHERE author_uid = ?').bind(targetUid),
+      db.prepare('DELETE FROM guild_create_requests WHERE requester_uid = ?').bind(targetUid),
+      db.prepare('DELETE FROM admin_requests WHERE requester_uid = ? OR reviewer_uid = ?').bind(targetUid, targetUid),
+      // 帖子相关 —— 先删图片、评论，再删帖子
+      db.prepare('DELETE FROM images WHERE author_uid = ?').bind(targetUid),
       db.prepare('DELETE FROM comments WHERE author_uid = ?').bind(targetUid),
       db.prepare('DELETE FROM posts WHERE author_uid = ?').bind(targetUid),
+      // 公告
       db.prepare('DELETE FROM announcements WHERE author_uid = ?').bind(targetUid),
+      // 公会 owner 清空（避免 users 外键冲突）
+      db.prepare('UPDATE guilds SET owner_uid = NULL WHERE owner_uid = ?').bind(targetUid),
+      // 最后删用户（guild_members/guild_join_requests 有 ON DELETE CASCADE 会自动清）
       db.prepare('DELETE FROM users WHERE uid = ?').bind(targetUid),
     ];
     await db.batch(stmts);
