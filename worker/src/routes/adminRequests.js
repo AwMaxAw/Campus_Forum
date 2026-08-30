@@ -75,7 +75,11 @@ adminRequests.post('/', requireAnyAdmin(), async (c) => {
     let targetExists = false;
     switch (type) {
       case 'delete_post': {
-        const r = await db.prepare('SELECT id, title, author_uid, author_nickname FROM posts WHERE id = ? AND is_hidden = 0').bind(targetId).first();
+        const r = await db.prepare(
+          `SELECT p.id, p.title, p.author_uid, u.nickname AS author_nickname
+           FROM posts p LEFT JOIN users u ON u.uid = p.author_uid
+           WHERE p.id = ? AND p.is_hidden = 0`
+        ).bind(targetId).first();
         if (r) {
           targetExists = true;
           targetSnapshot = `帖子 #${r.id}｜${r.title}｜作者 ${r.author_nickname || r.author_uid}`;
@@ -117,7 +121,7 @@ adminRequests.post('/', requireAnyAdmin(), async (c) => {
     const dup = await db
       .prepare(`SELECT id FROM admin_requests WHERE type = ? AND target_id = ? AND requester_uid = ? AND status = 'pending'`)
       .bind(type, targetId, uid).first();
-    if (dup) return c.json(fail('你已有同一条待审批申请，请等待运维管理员处理'), 400);
+    if (dup) return c.json(fail('你已有同一条待处理申请，请勿重复提交'), 400);
 
     const meNick = await db.prepare('SELECT nickname FROM users WHERE uid = ?').bind(uid).first();
     const result = await db
