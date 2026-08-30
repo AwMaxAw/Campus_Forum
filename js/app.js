@@ -2271,13 +2271,13 @@ async function renderExp(app) {
   };
   const calCellsHtml = buildCalCells(calData.year, calData.month, calData.checkedDates);
 
-  // 今日运势（优先从 calData 取，没有则从 checkin 返回值）
-  const fortuneHtml = calData.fortune
+  // 今日运势：**只有今日已签到** 才显示（未签到 / 未完成签到动作前一律隐藏）
+  const fortuneHtml = (calData.todayChecked && calData.fortune)
     ? `<div class="checkin-fortune" id="checkinFortune" style="color:${calData.fortuneColor || '#2563eb'}">
          <span class="checkin-fortune-emoji">${calData.fortuneEmoji || '🎭'}</span>
          <span class="checkin-fortune-text">今日运势：<b>${calData.fortune}</b></span>
        </div>`
-    : '';
+    : `<div class="checkin-fortune" id="checkinFortune" style="display:none"></div>`;
 
   app.innerHTML = `
     <!-- 签到板块（独立卡片）-->
