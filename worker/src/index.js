@@ -53,6 +53,7 @@ import feedbacksRoutes from './routes/feedbacks.js';
 import notificationsRoutes from './routes/notifications.js';
 import checkinRoutes from './routes/checkin.js';
 import guildsRoutes from './routes/guilds.js';
+import adminRequestsRoutes from './routes/adminRequests.js';
 
 const app = new Hono();
 
@@ -85,6 +86,7 @@ app.route('/api/feedbacks', feedbacksRoutes);
 app.route('/api/notifications', notificationsRoutes);
 app.route('/api/checkin', checkinRoutes);
 app.route('/api/guilds', guildsRoutes);
+app.route('/api/admin-requests', adminRequestsRoutes);
 
 // ============ 轻量自迁移：首次请求时给老库补新列（schema.sql 已含这些列，仅兼容旧部署）============
 // 用模块级 flag 避免同一 isolate 内重复执行；列已存在时 pragma 查到 c>0 直接跳过。
@@ -307,6 +309,29 @@ app.use('*', async (c, next) => {
             FOREIGN KEY (requester_uid) REFERENCES users(uid) ON DELETE CASCADE
           )
         `).run();
+      }
+
+      // ---- admin_requests ----
+      const hasAdminReq = await c.env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='admin_requests'`).first();
+      if (!hasAdminReq) {
+        await c.env.DB.prepare(`
+          CREATE TABLE admin_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL CHECK (type IN ('delete_post','delete_comment','ban_user','ban_guild')),
+            target_id TEXT NOT NULL,
+            target_snapshot TEXT,
+            reason TEXT NOT NULL DEFAULT '',
+            requester_uid TEXT NOT NULL,
+            requester_nickname TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reviewer_uid TEXT,
+            reviewer_note TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            reviewed_at TEXT
+          )
+        `).run();
+        await c.env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_admin_req_status ON admin_requests(status)`).run();
+        await c.env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_admin_req_requester ON admin_requests(requester_uid)`).run();
       }
       autoMigrated = true; // 全部成功才标记，失败则下次请求重试
     } catch (e) {

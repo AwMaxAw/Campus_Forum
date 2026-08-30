@@ -18,7 +18,7 @@
  *   - 已登录用户：每 60 秒刷新一次未读消息数，顶栏显示红点
  */
 
-import * as api from './api.js?v=20260829-guild';
+import * as api from './api.js?v=20260911-admin-sub';
 
 // ==================== 工具函数 ====================
 function escapeHtml(s) {
@@ -209,9 +209,12 @@ async function renderTopBar() {
   }
 
   if (loggedIn && me) {
-    const roleBadge = me.role === 'ops_admin'
-      ? `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`
-      : '';
+    let roleBadge = '';
+    if (me.role === 'ops_admin') {
+      roleBadge = `<span style="color:#dc2626;background:#fee2e2;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">运维管理员</span>`;
+    } else if (me.role === 'admin') {
+      roleBadge = `<span style="color:#1d4ed8;background:#dbeafe;padding:1px 6px;border-radius:4px;font-size:11px;margin-right:4px">管理员</span>`;
+    }
     // 顶栏分区控件统一用下拉框：
     //   - 标准账号（2611/2612/2621/2622）：默认选中本分区并锁定，选择其他分区会提示无权限并恢复
     //   - "其他"账号（管理员/非标准 UID）：可自由切换查看任意分区，并显示"其他"徽标
@@ -263,7 +266,8 @@ async function renderTopBar() {
 function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
   const drawerNav = document.getElementById('drawerNav');
   if (!drawerNav) return;
-  const isAdmin = loggedIn && me && (me.role === 'ops_admin');
+  const isOpsAdmin = loggedIn && me && (me.role === 'ops_admin');
+  const isAnyAdmin = loggedIn && me && (me.role === 'ops_admin' || me.role === 'admin');
   const items = loggedIn
     ? [
         { label: '首页',     icon: '🏠', hash: 'home' },
@@ -277,7 +281,8 @@ function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
         { label: '私信',     icon: '💬', hash: 'messages', badge: unreadMsg || 0 },
         { label: 'FAQ',      icon: '❓', hash: 'faq' },
         { label: '关于本站', icon: 'ℹ️', hash: 'about' },
-        ...(isAdmin ? [{ label: '运维管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
+        ...(isAnyAdmin ? [{ label: '管理员面板', icon: '📝', hash: 'admin-sub', highlight: true, subColor: '#1d4ed8' }] : []),
+        ...(isOpsAdmin ? [{ label: '运维管理员面板', icon: '🛡', hash: 'admin', highlight: true }] : []),
       ]
     : [
         { label: '首页',     icon: '🏠', hash: 'home' },
@@ -292,7 +297,7 @@ function renderDrawer(loggedIn, me, unreadMsg, unreadNotif) {
   drawerNav.innerHTML = items.map(it => {
     const active = cur === it.hash ? 'active' : '';
     const badge = it.badge ? `<span class="unread-badge">${it.badge}</span>` : '';
-    const style = it.highlight ? 'style="color:#b45309"' : '';
+    const style = it.subColor ? `style="color:${it.subColor}"` : (it.highlight ? 'style="color:#b45309"' : '');
     return `<a href="#${it.hash}" class="${active}" ${style} onclick="closeDrawer()">
       <span>${it.icon}</span>
       <span>${escapeHtml(it.label)}</span>
@@ -341,6 +346,7 @@ function postCard(p, opts = {}) {
        </div>`
     : '';
   const stats = `👁 ${p.viewCount || 0}　👍 ${p.likeCount || 0}　💬 ${p.commentCount || 0}`;
+  const postIdBadge = `<span style="font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 6px;border-radius:4px;margin-left:4px" title="帖子编号">#${p.id}</span>`;
   const clickable = opts.allowClick ? 'clickable' : '';
   // 置顶帖（带 foldId）的卡片 div 不绑 onclick 跳转，避免与"折叠"操作的内联 onclick 时序冲突；
   // 改由标题 h3 可点击跳转详情。普通帖保持整卡可点。
@@ -369,7 +375,7 @@ function postCard(p, opts = {}) {
       ${imagesHtml}
       ${tags}
       <div class="meta" style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-        <span>${stats}</span>
+        <span>${stats}${postIdBadge}</span>
         ${foldBtn}
       </div>
     </div>
@@ -953,6 +959,7 @@ function renderFeedbackItem(f) {
         <span style="font-size:12px;font-weight:600;color:#374151">${escapeHtml(author.nickname || '匿名用户')}</span>
         ${guildBadge(f.author || {})}
         ${author.role === 'ops_admin' ? `<span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:1px 5px;border-radius:3px">运维管理员</span>` : ''}
+        ${author.role === 'admin' ? `<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;padding:1px 5px;border-radius:3px">管理员</span>` : ''}
         <span style="font-size:11px;color:#9ca3af">${escapeHtml(formatTime(f.createdAt))}</span>
       </div>
       <div style="font-size:13px;color:#1f2937;line-height:1.5;white-space:pre-wrap;word-break:break-word">${escapeHtml(normalizeNewlines(f.content))}</div>
@@ -1799,6 +1806,7 @@ async function renderDetail(app, postId) {
         ${pinBadge}${catBadge}${detailAuthorHtml}
         <span>·</span><span>${escapeHtml(formatTime(p.createdAt))}</span>
         <span>·</span><span>👁 ${p.viewCount} 浏览</span>
+        <span>·</span><span style="font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 6px;border-radius:4px" title="帖子编号">#${p.id}</span>
       </div>
       <h2>${escapeHtml(p.title)}</h2>
       <div class="detail-body">${escapeHtml(normalizeNewlines(p.content))}</div>
@@ -1814,6 +1822,8 @@ async function renderDetail(app, postId) {
         <button class="secondary" onclick="document.getElementById('commentInput').focus()">💬 评论 (${p.commentCount})</button>
         ${(me && (me.uid === p.authorUid || me.role === 'ops_admin'))
           ? `<button id="delPostBtn" class="danger">🗑 删除帖子</button>` : ''}
+        ${(me && (me.role === 'admin'))
+          ? `<button id="reqDelPostBtn" class="secondary" style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe">📝 申请删除帖子</button>` : ''}
         ${(me && (me.role === 'ops_admin'))
           ? `<button id="editPostBtn" class="secondary">✏️ 编辑帖子</button>` : ''}
       </div>
@@ -1859,6 +1869,14 @@ async function renderDetail(app, postId) {
       favBtn.firstChild.nodeValue = fav ? '★ 已收藏' : '☆ 收藏';
     } else alert(r.message || '操作失败');
   });
+
+  // ---- 申请删除帖子（admin 角色按钮）----
+  const reqDelPostBtn = document.getElementById('reqDelPostBtn');
+  if (reqDelPostBtn) {
+    reqDelPostBtn.addEventListener('click', () => {
+      openAdminRequestDialog({ presetType: 'delete_post', presetTargetId: String(p.id) });
+    });
+  }
 
   // ---- 删帖 ----
   const delPostBtn = document.getElementById('delPostBtn');
@@ -2005,6 +2023,7 @@ async function loadAndRenderComments(postId) {
     const canReply = me && !deleted;
     const canDelete = me && !deleted && (me.uid === c.authorUid || me.role === 'ops_admin');
     const canEdit = me && !deleted && (me.role === 'ops_admin');
+    const canRequestDelete = me && !deleted && me.role === 'admin';
 
     // 评论作者信息（头像+昵称+Lv）
     let headerLeft;
@@ -2026,9 +2045,10 @@ async function loadAndRenderComments(postId) {
     return `
       <div class="comment-item ${isReply ? 'reply' : ''}" data-comment-id="${c.id}">
         <div class="comment-header">
-          <span>${headerLeft} · ${escapeHtml(formatTime(c.createdAt))}</span>
+          <span>${headerLeft} · ${escapeHtml(formatTime(c.createdAt))} <span style="font-size:10px;color:#9ca3af;background:#f3f4f6;padding:0 5px;border-radius:3px;margin-left:2px" title="评论编号">#${c.id}</span></span>
           ${canDelete ? `<button class="ghost danger-style" onclick="deleteComment(${c.id}, ${postId})" style="color:#ff3b30;background:none">删除</button>` : ''}
           ${canEdit ? `<button class="ghost" onclick="toggleEditComment(${c.id})" style="color:#2563eb;background:none">编辑</button>` : ''}
+          ${canRequestDelete ? `<button class="ghost" onclick="openAdminRequestDialog({presetType:'delete_comment',presetTargetId:'${c.id}'})" style="color:#1d4ed8;background:none;font-size:12px">📝 申请删除</button>` : ''}
         </div>
         ${replyRef}
         <div id="comment-content-${c.id}">${contentHtml}</div>
@@ -2135,6 +2155,7 @@ function setAvatarPreviewsSrc(src) {
 // 角色徽章（个人主页 header 用）
 function roleBadgeInline(role) {
   if (role === 'ops_admin') return ' <span style="background:#fee2e2;color:#dc2626;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">运维管理员</span>';
+  if (role === 'admin') return ' <span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:6px">管理员</span>';
   return '';
 }
 // 资料变更后局部刷新：个人主页顶部 header（头像+昵称+简介）+ 编辑表单预览 + 顶栏昵称
@@ -3026,6 +3047,18 @@ async function renderAdmin(app) {
   app.innerHTML = `
     <div class="toolbar"><span style="font-size:16px;font-weight:600;color:#dc2626">🛡 运维管理员面板</span></div>
 
+    <!-- 板块0：待审批申请（管理员提交的删帖/删评/封禁用户/封禁公会 申请） -->
+    <div class="card" style="border:2px solid #f59e0b22">
+      <h3 style="margin-top:0;color:#b45309">📝 待审批申请（管理员提交）</h3>
+      <p class="hint">这里展示协助管理员提交的「删除 / 封禁」申请，通过后将立即执行对应动作。</p>
+      <div id="adminPendingRequests">🔄 加载中...</div>
+      <div style="margin-top:10px">
+        <details><summary style="cursor:pointer;color:#6b7280;font-size:13px">展开查看历史申请（已执行 / 已拒绝）</summary>
+          <div id="adminHistoryRequests" style="margin-top:8px">🔄 加载中...</div>
+        </details>
+      </div>
+    </div>
+
     <!-- 板块1：已注册账号（按 UID 分组） -->
     <div class="card">
       <h3 style="margin-top:0">👤 已注册账号</h3>
@@ -3200,7 +3233,77 @@ async function renderAdmin(app) {
   // --- 板块5：公会管理 ---
   window._adminGuildTab = 'guilds';
   renderAdminGuildsContent();
+
+  // --- 板块0：待审批 / 历史申请 ---
+  (async () => {
+    const host = document.getElementById('adminPendingRequests');
+    if (!host) return;
+    try {
+      const r = await api.adminRequests.pending();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = r.data || [];
+      if (!list.length) { host.innerHTML = `<div class="hint">✅ 当前没有待审批申请。</div>`; return; }
+      host.innerHTML = list.map(r => buildApprovalCard(r, { reload: () => renderAdmin(app) })).join('');
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message || e)}`; }
+  })();
+  (async () => {
+    const host = document.getElementById('adminHistoryRequests');
+    if (!host) return;
+    try {
+      const r = await api.adminRequests.history();
+      if (!r.success) { host.innerHTML = `❌ ${escapeHtml(r.message)}`; return; }
+      const list = (r.data || []).slice(0, 50);
+      if (!list.length) { host.innerHTML = `<div class="hint">暂无历史申请。</div>`; return; }
+      host.innerHTML = list.map(r => buildApprovalCard(r, { history: true })).join('');
+    } catch (e) { host.innerHTML = `❌ ${escapeHtml(e.message || e)}`; }
+  })();
 }
+
+// 申请卡片（运维面板审批用 / 历史用）
+function buildApprovalCard(r, opts = {}) {
+  const typeLabelMap = { delete_post: '删帖', delete_comment: '删评', ban_user: '封禁用户', ban_guild: '封禁公会' };
+  const typeColorMap = { delete_post: '#2563eb', delete_comment: '#7c3aed', ban_user: '#dc2626', ban_guild: '#b45309' };
+  const statusColor = r.status === 'pending' ? '#b45309' : r.status === 'approved' ? '#166534' : '#b91c1c';
+  const statusText = r.status === 'pending' ? '待审批' : r.status === 'approved' ? '已执行' : '已拒绝';
+  const tl = typeLabelMap[r.type] || r.type;
+  const tc = typeColorMap[r.type] || '#6b7280';
+  const actionBar = opts.history
+    ? ''
+    : `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="appr-note-${r.id}" class="input" style="flex:1;min-width:180px;padding:4px 8px;font-size:13px" placeholder="审批备注（可选）" />
+        <button class="secondary" onclick="rejectAdminRequest(${r.id})" style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca">❌ 拒绝</button>
+        <button onclick="approveAdminRequest(${r.id})" style="background:#166534;color:#fff;border:1px solid #166534">✅ 通过并执行</button>
+      </div>`;
+  return `<div class="card" style="padding:10px;margin-bottom:8px;border-left:4px solid ${tc}">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+      <span style="font-size:11px;background:${tc}15;color:${tc};padding:2px 8px;border-radius:10px">${tl}</span>
+      <span style="font-size:11px;background:#fef3c7;color:${statusColor};padding:2px 8px;border-radius:10px">${statusText}</span>
+      <span style="font-size:12px;color:#6b7280;margin-left:auto">${escapeHtml(r.createdAt || '')}</span>
+    </div>
+    <div style="font-size:13px"><b>目标快照：</b>${escapeHtml(r.targetSnapshot || r.targetId)}</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:2px">目标编号：${escapeHtml(r.targetId)}｜申请人：${escapeHtml(r.requesterNickname || r.requesterUid)}｜申请编号：#${r.id}</div>
+    <div style="margin-top:6px;padding:6px 10px;background:#f9fafb;border-left:3px solid #6366f1;font-size:13px;border-radius:4px"><b>理由：</b>${escapeHtml(r.reason || '（无）')}</div>
+    ${r.reviewerNote ? `<div style="margin-top:6px;padding:6px 10px;background:#f3f4f6;border-left:3px solid #6b7280;font-size:13px;border-radius:4px"><b>审批备注：</b>${escapeHtml(r.reviewerNote)}${r.reviewedAt ? ` <span style="color:#9ca3af">（${r.reviewedAt}）</span>` : ''}</div>` : ''}
+    ${actionBar}
+  </div>`;
+}
+
+// 审批动作（挂 window 供内联调用）
+window.approveAdminRequest = async function (id) {
+  if (!confirm('确定通过该申请？通过后将立即执行相应动作（删除 / 封禁）。')) return;
+  const noteEl = document.getElementById(`appr-note-${id}`);
+  const note = noteEl ? (noteEl.value || '').trim().slice(0, 300) : '';
+  const r = await api.adminRequests.approve(id, note);
+  if (r && r.success) { alert('✅ 已通过并执行'); route(); }
+  else alert('❌ ' + ((r && r.message) || '操作失败'));
+};
+window.rejectAdminRequest = async function (id) {
+  const noteEl = document.getElementById(`appr-note-${id}`);
+  const note = noteEl ? (noteEl.value || '').trim().slice(0, 300) : (prompt('请输入拒绝理由（可选）：') || '');
+  const r = await api.adminRequests.reject(id, note || '');
+  if (r && r.success) { alert('已拒绝'); route(); }
+  else alert('❌ ' + ((r && r.message) || '操作失败'));
+};
 
 // ==================== 管理员：公会管理面板 ====================
 // 缓存（避免频繁请求）
@@ -4248,6 +4351,205 @@ window.doPost = async function doPost() {
   }
 };
 
+// ==================== 申请删除/封禁弹窗（供详情页「申请删除/封禁」按钮复用）====================
+// presetType: delete_post | delete_comment | ban_user | ban_guild
+// presetTargetId: 帖子id | 评论id | 用户uid | 公会id
+// onSuccess?: 回调（提交成功后触发，用于刷新面板）
+window.openAdminRequestDialog = function openAdminRequestDialog({ presetType, presetTargetId, onSuccess }) {
+  const TYPES = [
+    { key: 'delete_post',    label: '删除帖子', placeholder: '请输入帖子编号（#数字后面的数字）', fieldLabel: '帖子编号' },
+    { key: 'delete_comment', label: '删除评论', placeholder: '请输入评论编号', fieldLabel: '评论编号' },
+    { key: 'ban_user',       label: '封禁用户', placeholder: '请输入用户 UID（8 位数字）', fieldLabel: '用户 UID' },
+    { key: 'ban_guild',      label: '封禁公会', placeholder: '请输入公会 ID', fieldLabel: '公会 ID' },
+  ];
+  const defaultType = presetType || 'delete_post';
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.innerHTML = `
+    <div class="modal-box" style="max-width:480px">
+      <div style="font-weight:600;font-size:16px;margin-bottom:12px;color:#1d4ed8">📝 提交管理员申请</div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">申请类型</label>
+        <select id="arType" class="input">
+          ${TYPES.map(t => `<option value="${t.key}"${t.key === defaultType ? ' selected' : ''}>${t.label}</option>`).join('')}
+        </select>
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl" id="arTargetLabel">目标编号</label>
+        <input id="arTarget" class="input" placeholder="..." />
+      </div>
+      <div style="margin-bottom:12px">
+        <label class="lbl">申请理由（10~500 字）</label>
+        <textarea id="arReason" class="input" rows="4" placeholder="请说明原因，便于运维管理员审核"></textarea>
+      </div>
+      <div id="arErr" style="color:#dc2626;font-size:12px;margin-bottom:8px;min-height:1em"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="secondary" id="arCancel">取消</button>
+        <button id="arOk">提交申请</button>
+      </div>
+    </div>`;
+  document.body.appendChild(mask);
+  const errEl = mask.querySelector('#arErr');
+  const sel = mask.querySelector('#arType');
+  const targetInput = mask.querySelector('#arTarget');
+  const reasonInput = mask.querySelector('#arReason');
+  const targetLabel = mask.querySelector('#arTargetLabel');
+  function refreshTargetLabel() {
+    const t = TYPES.find(x => x.key === sel.value);
+    targetLabel.textContent = t ? t.fieldLabel : '目标编号';
+    targetInput.placeholder = t ? t.placeholder : '请输入';
+    if (presetTargetId && sel.value === presetType) targetInput.value = presetTargetId;
+  }
+  refreshTargetLabel();
+  if (presetTargetId) targetInput.value = presetTargetId;
+  sel.addEventListener('change', refreshTargetLabel);
+  mask.querySelector('#arCancel').addEventListener('click', () => mask.remove());
+  mask.addEventListener('click', (e) => { if (e.target === mask) mask.remove(); });
+  mask.querySelector('#arOk').addEventListener('click', async () => {
+    const type = sel.value;
+    const targetId = targetInput.value.trim();
+    const reason = reasonInput.value.trim();
+    errEl.textContent = '';
+    if (!targetId) { errEl.textContent = '请输入目标编号 / UID / ID'; return; }
+    if (reason.length < 5) { errEl.textContent = '理由至少 5 个字'; return; }
+    if (reason.length > 500) { errEl.textContent = '理由不能超过 500 字'; return; }
+    try {
+      const r = await api.adminRequests.create({ type, targetId, reason });
+      if (r && r.success) {
+        mask.remove();
+        alert('✅ 申请已提交，等待运维管理员处理');
+        if (typeof onSuccess === 'function') onSuccess(r.data);
+      } else {
+        errEl.textContent = (r && r.message) || '提交失败';
+      }
+    } catch (e) {
+      errEl.textContent = '网络异常：' + (e && e.message || '');
+    }
+  });
+};
+
+// ==================== 视图：协助管理员面板（ops_admin / admin 都可见） ====================
+async function renderAdminSub(app) {
+  const me = api.isLoggedIn() ? api.getCurrentUser() : null;
+  if (!me || (me.role !== 'ops_admin' && me.role !== 'admin')) {
+    app.innerHTML = `<div class="card">⛔ 仅管理员或运维管理员可访问该面板。<br><a href="#login">去登录</a> 或 <a href="#forum">返回广场</a></div>`;
+    return;
+  }
+  app.innerHTML = `<div class="empty">🔄 加载中...</div>`;
+  const roleLabel = me.role === 'ops_admin' ? '运维管理员' : '管理员';
+  const roleCss = me.role === 'ops_admin' ? '#dc2626' : '#1d4ed8';
+
+  let mineRes = { success: true, data: [] };
+  try { mineRes = await api.adminRequests.mine() || { success: true, data: [] }; } catch {}
+  const mine = Array.isArray(mineRes && mineRes.data) ? mineRes.data : [];
+  const pendingList = mine.filter(r => r.status === 'pending');
+  const executedList = mine.filter(r => r.status !== 'pending');
+
+  function statusBadge(s) {
+    if (s === 'pending') return `<span style="background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:10px;font-size:11px">待审批</span>`;
+    if (s === 'approved') return `<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:10px;font-size:11px">已执行</span>`;
+    if (s === 'rejected') return `<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:10px;font-size:11px">已拒绝</span>`;
+    return `<span>${s || ''}</span>`;
+  }
+  function typeBadge(t) {
+    const label = { delete_post: '删帖', delete_comment: '删评', ban_user: '封禁用户', ban_guild: '封禁公会' }[t] || t;
+    const color = { delete_post: '#2563eb', delete_comment: '#7c3aed', ban_user: '#dc2626', ban_guild: '#b45309' }[t] || '#6b7280';
+    return `<span style="background:${color}15;color:${color};padding:2px 8px;border-radius:10px;font-size:11px;margin-right:6px">${label}</span>`;
+  }
+  function reqCard(r) {
+    return `<div class="card" style="padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div>
+          ${typeBadge(r.type)}${statusBadge(r.status)}
+          <div style="font-size:14px;margin-top:6px"><b>目标：</b>${escapeHtml(r.targetSnapshot || r.targetId)}</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:4px">目标编号：${escapeHtml(r.targetId)}</div>
+        </div>
+        <div style="text-align:right;font-size:12px;color:#6b7280">
+          <div>${escapeHtml(r.createdAt || '')}</div>
+          <div style="margin-top:4px">申请人：${escapeHtml(r.requesterNickname || r.requesterUid)}</div>
+          ${r.reviewedAt ? `<div style="margin-top:4px">处理时间：${escapeHtml(r.reviewedAt)}</div>` : ''}
+        </div>
+      </div>
+      <div style="font-size:13px;margin-top:8px;background:#f9fafb;border-left:3px solid #6366f1;padding:6px 10px;border-radius:4px">
+        <b>理由：</b>${escapeHtml(r.reason || '（无）')}
+      </div>
+      ${r.status !== 'pending' ? `<div style="font-size:13px;margin-top:6px;background:#f3f4f6;border-left:3px solid #6b7280;padding:6px 10px;border-radius:4px">
+        <b>审批备注：</b>${escapeHtml(r.reviewerNote || '（无）')}
+      </div>` : ''}
+    </div>`;
+  }
+
+  app.innerHTML = `
+    <div class="toolbar" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <span style="font-size:16px;font-weight:600;color:${roleCss}">📝 管理员面板</span>
+      <span style="font-size:12px;color:#6b7280">身份：${roleLabel}（${escapeHtml(me.uid)}）</span>
+    </div>
+
+    <!-- 申请板块 1：删除帖子 / 删除评论 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:10px;color:#2563eb">🗑 删除内容申请（帖子 / 评论）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label class="lbl">① 版块：删除帖子</label>
+          <input id="inp-post-id" class="input" placeholder="帖子编号（例如 12）" />
+          <textarea id="inp-post-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('delete_post','inp-post-id','inp-post-reason')" style="margin-top:6px">申请删除帖子</button>
+        </div>
+        <div>
+          <label class="lbl">② 版块：删除评论</label>
+          <input id="inp-cmt-id" class="input" placeholder="评论编号（例如 58）" />
+          <textarea id="inp-cmt-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('delete_comment','inp-cmt-id','inp-cmt-reason')" style="margin-top:6px">申请删除评论</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 申请板块 2：封禁用户 / 封禁公会 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:10px;color:#dc2626">🚫 封禁申请（用户 / 公会）</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label class="lbl">③ 版块：封禁用户</label>
+          <input id="inp-user-uid" class="input" placeholder="用户 UID（8 位数字，例如 26110101）" />
+          <textarea id="inp-user-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('ban_user','inp-user-uid','inp-user-reason')" style="margin-top:6px">申请封禁用户</button>
+        </div>
+        <div>
+          <label class="lbl">④ 版块：封禁公会</label>
+          <input id="inp-guild-id" class="input" placeholder="公会 ID（例如 1）" />
+          <textarea id="inp-guild-reason" class="input" rows="2" placeholder="申请理由（必填）"></textarea>
+          <button onclick="submitRequest('ban_guild','inp-guild-id','inp-guild-reason')" style="margin-top:6px">申请封禁公会</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="toolbar"><span style="font-weight:600;color:#b45309">⏳ 待通过 / 已申请待处理（共 ${pendingList.length}）</span></div>
+        ${pendingList.length ? pendingList.map(reqCard).join('') : `<div class="card" style="color:#6b7280">暂无待审批申请。</div>`}
+      </div>
+      <div>
+        <div class="toolbar"><span style="font-weight:600;color:#166534">✅ 已执行 / 历史处理（共 ${executedList.length}）</span></div>
+        ${executedList.length ? executedList.slice(0, 100).map(reqCard).join('') : `<div class="card" style="color:#6b7280">暂无历史记录。</div>`}
+      </div>
+    </div>
+  `;
+
+  window.submitRequest = async function (type, idInpId, reasonInpId) {
+    const tid = (document.getElementById(idInpId).value || '').trim();
+    const reason = (document.getElementById(reasonInpId).value || '').trim();
+    if (!tid) { alert('请输入目标编号 / UID / ID'); return; }
+    if (!reason) { alert('请填写申请理由'); return; }
+    const r = await api.adminRequests.create({ type, targetId: tid, reason });
+    if (r && r.success) {
+      alert('✅ 申请已提交，等待运维管理员处理');
+      renderAdminSub(document.getElementById('app'));
+    } else {
+      alert('❌ ' + ((r && r.message) || '提交失败'));
+    }
+  };
+}
+
 // ==================== 视图：用户公开主页（点头像/昵称进入） ====================
 async function renderUserProfile(app, uid) {
   app.innerHTML = `<div class="empty">🔄 加载中...</div>`;
@@ -4281,7 +4583,12 @@ async function renderUserProfile(app, uid) {
         <div class="profile-name">${escapeHtml(profile.nickname)}${guildBadge(profile)}${roleBadgeInline(profile.role)}${isMe ? ' <span style="color:#6b7280;font-size:12px;margin-left:6px">（这是你自己）</span>' : ''}</div>
         <div class="profile-uid">UID：${escapeHtml(profile.uid)}　帖子数：${profile.postCount || 0}　注册于 ${escapeHtml(formatTime(profile.createdAt))}</div>
         ${profile.bio ? `<div class="profile-bio">${escapeHtml(profile.bio)}</div>` : '<div class="profile-bio" style="opacity:0.6">这个人还没有写简介</div>'}
-        <div style="display:flex;gap:8px;flex-wrap:wrap">${editBtn}${messageBtn}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${editBtn}${messageBtn}
+          ${(me && (me.role === 'ops_admin' || me.role === 'admin') && profile.role !== 'ops_admin' && !isMe)
+            ? `<button class="secondary" style="margin-top:8px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca" onclick="openAdminRequestDialog({presetType:'ban_user',presetTargetId:'${escapeHtml(profile.uid)}'})">🚫 申请封禁该用户</button>`
+            : ''}
+        </div>
       </div>
     </div>
   `;
@@ -4462,6 +4769,10 @@ async function renderGuildDetail(app, id) {
     const myStatus = isMember
       ? `<span class="level-badge">${myRole}</span>`
       : `<button onclick="applyJoinGuild(${g.id})">📥 申请加入</button>`;
+    // 协助管理员：申请封禁该公会按钮（公会详情页）
+    const adminBanBtn = (me && me.role === 'admin' && g.status !== 'banned')
+      ? `<button class="secondary" onclick="openAdminRequestDialog({presetType:'ban_guild',presetTargetId:'${g.id}'})" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;margin-left:auto">🚫 申请封禁公会</button>`
+      : '';
 
     const membersHtml = members.length === 0
       ? `<span class="hint">暂无成员</span>`
@@ -4474,13 +4785,17 @@ async function renderGuildDetail(app, id) {
             ${roleLabel ? `<span style="font-size:11px;color:#6b7280">${roleLabel}</span>` : ''}
           </div>`;
         }).join('');
+    const guildIdBadge = `<span style="font-size:11px;color:#9ca3af;background:#f3f4f6;padding:1px 6px;border-radius:4px" title="公会 ID">ID: #${g.id}</span>`;
+    const statusBadge = g.status === 'banned'
+      ? `<span style="font-size:11px;background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:10px">已封禁</span>`
+      : (g.status === 'active' ? '' : `<span style="font-size:11px;background:#e5e7eb;color:#374151;padding:2px 8px;border-radius:10px">${escapeHtml(g.status)}</span>`);
 
     document.getElementById('guildDetailLoading').outerHTML = `
       <div class="card guild-detail-header">
         <div style="display:flex;align-items:center;gap:16px">
           <div style="font-size:48px">${g.icon || '🏰'}</div>
           <div style="flex:1">
-            <h2 style="margin:0">${escapeHtml(g.name)}</h2>
+            <h2 style="margin:0">${escapeHtml(g.name)} ${statusBadge} ${guildIdBadge}</h2>
             <div style="color:#6b7280;margin-top:4px">${escapeHtml(g.description || '暂无简介')}</div>
           </div>
           <div style="text-align:right">
@@ -4488,9 +4803,10 @@ async function renderGuildDetail(app, id) {
             <div style="font-size:12px;color:#6b7280">成员</div>
           </div>
         </div>
-        <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+        <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           ${myStatus}
           ${isMember && myRole !== 'owner' ? `<button class="ghost danger-style" onclick="leaveGuild(${g.id})" style="color:#dc2626">退出公会</button>` : ''}
+          ${adminBanBtn}
         </div>
       </div>
       <div class="card">
@@ -4545,6 +4861,7 @@ function route() {
   else if (path === 'calendar') renderCalendar(app);
   else if (path === 'about') renderAbout(app);
   else if (path === 'admin') renderAdmin(app);
+  else if (path === 'admin-sub') renderAdminSub(app);
   else if (path === 'guilds') renderGuilds(app);
   else if (path === 'guild' && seg2) renderGuildDetail(app, parseInt(seg2, 10));
   else if (path === 'forum') renderForum(app);

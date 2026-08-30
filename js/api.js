@@ -22,7 +22,7 @@ const API_BASE = (typeof window !== 'undefined' && window.__CAMPUS_FORUM_API_BAS
 
 // 分区枚举（category key 存库 / label 展示 / adminOnly 控制是否仅管理员可见+可选/可筛选）
 // 这个枚举必须与 worker/src/routes/posts.js 的 ALLOWED_CATEGORIES_KEYS 保持一致。
-export const ADMIN_ROLES = new Set(['ops_admin']);
+export const ADMIN_ROLES = new Set(['ops_admin', 'admin']);
 export const CATEGORIES = [
   { key: 'general', label: '综合', cssColor: '#6b7280', description: '没明确归属的日常讨论' },
   { key: 'study',   label: '学习', cssColor: '#2563eb', description: '学习交流、作业、题目、考试经验' },
@@ -65,6 +65,11 @@ export function getLevelInfo(expRaw, role) {
   if (role === 'ops_admin') {
     const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
     return { level: 999, currentBase: 0, nextBase: 0, exp, progress: 1, toNext: 0, isAdmin: true };
+  }
+  // 协助管理员 → 永远 Lv.888
+  if (role === 'admin') {
+    const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
+    return { level: 888, currentBase: 0, nextBase: 0, exp, progress: 1, toNext: 0, isAdmin: true };
   }
   const exp = Math.max(0, Math.floor(Number(expRaw) || 0));
   const lastIdx = LEVEL_THRESHOLDS.length - 1;
@@ -607,6 +612,48 @@ export const admin = {
       method: 'PATCH',
       body: { expPoints: Math.floor(Number(expPoints) || 0) },
     });
+  },
+  /** 创建/更新协助管理员账号（ops_admin 专属） */
+  async createSubAdmin({ uid, password, nickname, expPoints }) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!uid) return { success: false, message: '缺少 uid' };
+    return request('/api/admin/sub-admin', { method: 'POST', body: { uid, password, nickname, expPoints } });
+  },
+};
+
+// ======================== 管理员协助申请 ========================
+export const adminRequests = {
+  /** 创建申请（admin / ops_admin） */
+  async create({ type, targetId, reason }) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin-requests', { method: 'POST', body: { type, targetId, reason } });
+  },
+  /** 我提交的申请列表（含 pending + 历史） */
+  async mine() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin-requests/mine');
+  },
+  /** ops_admin 待审批列表 */
+  async pending() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin-requests/pending');
+  },
+  /** 历史申请 */
+  async history() {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    return request('/api/admin-requests/history');
+  },
+  /** 审批通过并执行 */
+  async approve(id, note) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少申请 id' };
+    return request(`/api/admin-requests/${id}/approve`, { method: 'POST', body: { note: note || '' } });
+  },
+  /** 审批拒绝 */
+  async reject(id, note) {
+    if (!tokenCache) return { success: false, message: '请先登录' };
+    if (!id) return { success: false, message: '缺少申请 id' };
+    return request(`/api/admin-requests/${id}/reject`, { method: 'POST', body: { note: note || '' } });
   },
 };
 

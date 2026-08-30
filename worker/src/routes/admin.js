@@ -13,6 +13,7 @@
 import { Hono } from 'hono';
 import { jwt } from 'hono/jwt';
 import { createMiddleware } from 'hono/factory';
+import { hashPassword, isUidValid, serializeUser } from '../utils/auth.js';
 
 const admin = new Hono();
 
@@ -416,6 +417,60 @@ admin.patch('/users/:uid/exp', requireAdmin(), async (c) => {
     }));
   } catch (e) {
     return fail(`[admin adjust exp] ${e.name}: ${e.message}`, 500);
+  }
+});
+
+// ==================== 创建/更新协助管理员账号（ops_admin 专属）====================
+// body: { uid, password, nickname?, expPoints? }
+// 会自动把 role 设为 admin；若账号已存在则只更新密码/昵称/积分/角色
+admin.post('/sub-admin', requireAdmin(), async (c) => {
+  try {
+    const db = c.env.DB;
+    let body;
+    try { body = await c.req.json(); } catch { return fail('请求体必须是合法 JSON'); }
+
+    const uid = (body.uid || '').trim();
+    const password = (body.password || '').toString();
+    const nickname = (body.nickname || '').trim() || `管理员${uid.slice(-4)}`;
+    const expPoints = typeof body.expPoints === 'number' ? Math.max(0, Math.floor(body.expPoints)) : null;
+
+    if (!isUidValid(uid)) return fail('UID 格式无效（8位）');
+    if (password && (password.length < 6 || password.length > 128)) return fail('密码 6-128 位');
+
+    const exists = await db.prepare('SELECT uid FROM users WHERE uid = ?').bind(uid).first();
+    if (exists) {
+      const upd = [];
+      const binds = [];
+      if (password) {
+        upd.push('password_hash = ?');
+        binds.push(await hashPassword(password));
+      }
+      if (nickname) {
+        upd.push('nickname = ?');
+        binds.push(nickname);
+      }
+      if (expPoints !== null) {
+        upd.push('exp_points = ?');
+        binds.push(expPoints);
+      }
+      upd.push("role = 'admin'");
+      upd.push("updated_at = datetime('now')");
+      binds.push(uid);
+      await db.prepare(`UPDATE users SET ${upd.join(', ')} WHERE uid = ?`).bind(...binds).run();
+    } else {
+      if (!password) return fail('新账号必须提供密码', 400);
+      const hash = await hashPassword(password);
+      const exp = expPoints !== null ? expPoints : 0;
+      await db.prepare(
+        `INSERT INTO users (uid, password_hash, nickname, role, exp_points, avatar_url, bio)
+         VALUES (?, ?, ?, 'admin', ?, NULL, '协助管理员')`
+      ).bind(uid, hash, nickname, exp).run();
+    }
+
+    const row = await db.prepare('SELECT * FROM users WHERE uid = ?').bind(uid).first();
+    return c.json(ok(await serializeUser(row, db)), 201);
+  } catch (e) {
+    return fail(`[admin sub-admin create] ${e.name}: ${e.message}`, 500);
   }
 });
 

@@ -105,7 +105,45 @@ export async function verifyPassword(password, storedHash) {
 export function isUidValid(uid) {
   // 新格式：YY(2) + Campus(1) + SchoolLevel(1) + Class(2) + StudentNo(2) = 8 位
   // YY: 26, Campus: 1=广五本部 2=金碧校区, SchoolLevel: 1=初中 2=高中
-  return typeof uid === 'string' && /^26[12][12]\d{4}$/.test(uid);
+  // 运维管理员：00000001（8 位全 0 前缀，特判）
+  return typeof uid === 'string' && (/^26[12][12]\d{4}$/.test(uid) || /^0{7}1$/.test(uid));
+}
+
+// ==================== 角色判定 helper（ops_admin = 最高级运维管理员；admin = 协助管理员） ====================
+export function isOpsAdmin(role) { return role === 'ops_admin'; }
+export function isSubAdmin(role) { return role === 'admin'; }
+export function isAnyAdmin(role) { return role === 'ops_admin' || role === 'admin'; }
+
+// requireAnyAdmin: ops_admin 或 admin 都放行（用于「协助管理员」面板通用入口）
+export function requireAnyAdmin() {
+  return async (c, next) => {
+    const payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) return c.json({ success: false, message: '需要登录' }, 401);
+    const user = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
+    if (!user) return c.json({ success: false, message: '用户不存在' }, 404);
+    if (!isAnyAdmin(user.role)) return c.json({ success: false, message: '无权限：需要管理员或运维管理员' }, 403);
+    return next();
+  };
+}
+
+// requireOpsAdmin: 只允许 ops_admin（用于真正执行删除/封禁/审批动作的接口）
+export function requireOpsAdmin() {
+  return async (c, next) => {
+    const payload = c.get('jwtPayload');
+    if (!payload || !payload.sub) return c.json({ success: false, message: '需要登录' }, 401);
+    const user = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
+    if (!user) return c.json({ success: false, message: '用户不存在' }, 404);
+    if (!isOpsAdmin(user.role)) return c.json({ success: false, message: '无权限：仅运维管理员可操作' }, 403);
+    return next();
+  };
+}
+
+// 当前登录者 role 快速读取（路由里直接复用减少重复 SQL）
+export async function getCurrentRole(c) {
+  const payload = c.get('jwtPayload');
+  if (!payload || !payload.sub) return null;
+  const u = await c.env.DB.prepare('SELECT role FROM users WHERE uid = ?').bind(payload.sub).first();
+  return u ? u.role : null;
 }
 
 // ==================== 用户序列化（返回给前端的用户对象） ====================

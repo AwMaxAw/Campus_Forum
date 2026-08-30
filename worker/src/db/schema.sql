@@ -210,6 +210,27 @@ CREATE TABLE IF NOT EXISTS guild_create_requests (
   FOREIGN KEY (requester_uid) REFERENCES users(uid) ON DELETE CASCADE
 );
 
+-- 管理员协助申请表（协助管理员提交的删帖/删评论/封禁用户/封禁公会 → 需 ops_admin 审批）
+-- type: delete_post / delete_comment / ban_user / ban_guild
+-- status: pending / approved / rejected / executed (部分动作成功后附加状态，approved 即已执行)
+CREATE TABLE IF NOT EXISTS admin_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL CHECK (type IN ('delete_post','delete_comment','ban_user','ban_guild')),
+  target_id TEXT NOT NULL,                        -- 帖子ID / 评论ID / 用户UID / 公会ID
+  target_snapshot TEXT,                           -- 冗余快照（帖子标题/用户昵称等，便于展示）
+  reason TEXT NOT NULL DEFAULT '',
+  requester_uid TEXT NOT NULL,                    -- 申请人 UID（admin 或 ops_admin）
+  requester_nickname TEXT,                        -- 冗余快照
+  status TEXT NOT NULL DEFAULT 'pending',         -- pending / approved / rejected
+  reviewer_uid TEXT,                              -- 审批人（ops_admin）
+  reviewer_note TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_admin_req_status ON admin_requests(status);
+CREATE INDEX IF NOT EXISTS idx_admin_req_requester ON admin_requests(requester_uid);
+CREATE INDEX IF NOT EXISTS idx_admin_req_type_target ON admin_requests(type, target_id);
+
 -- ============ 索引（SQLite 默认 B-tree 主键够用，但常用查询建索引更稳）============
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_uid);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
