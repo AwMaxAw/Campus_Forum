@@ -1,0 +1,670 @@
+{
+  "meta": {
+    "version": "1.0",
+    "exportedAt": "2026-09-02T16:01:05.556Z",
+    "source": "campus-forum-worker-d1",
+    "stats": {
+      "totalPosts": 19,
+      "visiblePosts": 12,
+      "hiddenPosts": 7,
+      "pinnedPosts": 4,
+      "totalComments": 13,
+      "postsWithImages": 3,
+      "byCategory": {
+        "meta": 6,
+        "general": 10,
+        "study": 1,
+        "life": 2
+      }
+    }
+  },
+  "posts": [
+    {
+      "id": 1,
+      "title": "欢迎来到广五校园论坛",
+      "content": "欢迎来到广五校园论坛！\n\n这是一个由广五学生自发创建的交流社区，旨在为同学们提供一个自由、友善的讨论空间。\n\n在这里，你可以：\n• 发布学习心得、讨论课业疑难\n• 分享校园生活、社团活动、社团招新\n• 交流兴趣爱好、寻找志同道合的伙伴\n• 发布失物招领、求助问答等各类信息\n\n请大家文明发言，共同维护一个干净、友好的社区环境。",
+      "tags": [
+        "公告",
+        "论坛动态"
+      ],
+      "category": "meta",
+      "region": "2612",
+      "imageIds": [],
+      "isPinned": true,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 27,
+        "likes": 0,
+        "comments": 1
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [
+        {
+          "id": 9,
+          "post_id": 1,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "awa",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 00:39:23"
+        }
+      ],
+      "createdAt": "2026-08-26 13:49:51",
+      "updatedAt": "2026-08-26 13:49:51"
+    },
+    {
+      "id": 2,
+      "title": "关于使用建议",
+      "content": "欢迎使用广五校园论坛！为了让大家拥有一个良好的交流环境，请仔细阅读以下使用建议：\n\n一、文明发言 遵守校纪\n• 请使用文明用语，理性讨论，尊重他人\n• 禁止人身攻击、恶意诋毁、辱骂他人\n• 禁止发布虚假信息、谣言、不实言论\n• 禁止发布广告、刷屏、引流等违规内容\n\n二、保护隐私 注意安全\n• 请勿在帖子、评论中公开他人真实姓名、身份证号、电话、家庭住址等个人隐私信息\n• 请勿公开自己的敏感个人信息，保护好账号密码\n• 遇到可疑信息或违规内容，请及时向管理员反馈\n\n三、规范发帖 善用标签\n• 发帖时请选择合适的分区和标签，便于他人查找\n• 标题请简明扼要，内容尽量详实完整\n• 不确定分类的内容可先放到「生活」分区，管理员会协助调整\n\n四、违规处理\n• 管理员有权对违规内容进行隐藏、删除处理\n• 严重违规者将被封禁账号\n• 涉及违法违规行为的，将配合学校及有关部门处理\n\n让我们一起努力，把广五校园论坛建设成一个温暖、文明、有益的交流家园！",
+      "tags": [
+        "使用须知",
+        "社区规范"
+      ],
+      "category": "meta",
+      "region": "2612",
+      "imageIds": [],
+      "isPinned": true,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 8,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [],
+      "createdAt": "2026-08-26 13:49:51",
+      "updatedAt": "2026-08-26 13:49:51"
+    },
+    {
+      "id": 4,
+      "title": "发帖分区、标题、内容标签置顶测试",
+      "content": "发帖分区、标题、内容标签置顶测试content",
+      "tags": [
+        "guan",
+        "li",
+        "管理"
+      ],
+      "category": "general",
+      "region": "2612",
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": true,
+      "stats": {
+        "views": 4,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [],
+      "createdAt": "2026-08-27 05:33:20",
+      "updatedAt": "2026-08-27 07:23:15"
+    },
+    {
+      "id": 5,
+      "title": "发帖分区、标题、内容标签置顶测试2",
+      "content": "发帖分区、标题、内容标签置顶测试2 content",
+      "tags": [
+        "管理"
+      ],
+      "category": "meta",
+      "region": "2612",
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 5,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [],
+      "createdAt": "2026-08-27 05:37:41",
+      "updatedAt": "2026-08-27 07:23:27"
+    },
+    {
+      "id": 6,
+      "title": "1+1=？",
+      "content": "1+1=？awa 无奖竞答",
+      "tags": [
+        "learning",
+        "无奖竞答"
+      ],
+      "category": "study",
+      "region": "2612",
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 23,
+        "likes": 1,
+        "comments": 3
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [
+        {
+          "id": 3,
+          "post_id": 6,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "2",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-27 05:40:22"
+        },
+        {
+          "id": 4,
+          "post_id": 6,
+          "author_uid": "55550001",
+          "author_nickname": "55550001",
+          "content": "okk",
+          "reply_to_id": 3,
+          "is_hidden": 0,
+          "created_at": "2026-08-27 05:42:09"
+        },
+        {
+          "id": 12,
+          "post_id": 6,
+          "author_uid": "26120630",
+          "author_nickname": "无敌暴龙机甲",
+          "content": "3",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 02:43:29"
+        }
+      ],
+      "createdAt": "2026-08-27 05:38:27",
+      "updatedAt": "2026-08-27 07:17:18"
+    },
+    {
+      "id": 7,
+      "title": "haoahahoh",
+      "content": "haoihoahoaho",
+      "tags": [
+        "发疯🤪"
+      ],
+      "category": "life",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 8,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "55550001",
+        "nickname": "55550001",
+        "role": "member"
+      },
+      "comments": [],
+      "createdAt": "2026-08-27 07:49:22",
+      "updatedAt": "2026-08-28 13:23:22"
+    },
+    {
+      "id": 9,
+      "title": "hello",
+      "content": "hello非常不错啊这个论坛",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 5,
+        "likes": 0,
+        "comments": 1
+      },
+      "author": {
+        "uid": "26120624",
+        "nickname": "杞人",
+        "role": "member"
+      },
+      "comments": [
+        {
+          "id": 6,
+          "post_id": 9,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "hello",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-28 13:13:23"
+        }
+      ],
+      "createdAt": "2026-08-28 13:12:13",
+      "updatedAt": "2026-08-28 13:12:13"
+    },
+    {
+      "id": 10,
+      "title": "Hello",
+      "content": "hello everyone!",
+      "tags": [
+        "嘻嘻"
+      ],
+      "category": "meta",
+      "region": "2612",
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 4,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [],
+      "createdAt": "2026-08-28 13:12:28",
+      "updatedAt": "2026-08-28 13:12:28"
+    },
+    {
+      "id": 11,
+      "title": "awa",
+      "content": "awa",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": true,
+      "stats": {
+        "views": 1,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "26120635",
+        "nickname": "andreas",
+        "role": "member"
+      },
+      "comments": [],
+      "createdAt": "2026-08-29 11:55:37",
+      "updatedAt": "2026-08-29 11:55:37"
+    },
+    {
+      "id": 12,
+      "title": "awa积分测试",
+      "content": "awa积分测试",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": true,
+      "stats": {
+        "views": 1,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "26120635",
+        "nickname": "andreas",
+        "role": "member"
+      },
+      "comments": [],
+      "createdAt": "2026-08-29 12:09:52",
+      "updatedAt": "2026-08-29 12:09:52"
+    },
+    {
+      "id": 13,
+      "title": "awa积分测试",
+      "content": "awa积分测试",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": true,
+      "stats": {
+        "views": 1,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "26120635",
+        "nickname": "andreas",
+        "role": "member"
+      },
+      "comments": [],
+      "createdAt": "2026-08-29 12:16:48",
+      "updatedAt": "2026-08-29 12:16:48"
+    },
+    {
+      "id": 14,
+      "title": "awa积分测试",
+      "content": "awa积分测试",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": true,
+      "stats": {
+        "views": 19,
+        "likes": 1,
+        "comments": 2
+      },
+      "author": {
+        "uid": "26120635",
+        "nickname": "andreas",
+        "role": "member"
+      },
+      "comments": [
+        {
+          "id": 7,
+          "post_id": 14,
+          "author_uid": "26120635",
+          "author_nickname": "andreas",
+          "content": "awa",
+          "reply_to_id": null,
+          "is_hidden": 1,
+          "created_at": "2026-08-29 12:30:33"
+        },
+        {
+          "id": 8,
+          "post_id": 14,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "awa",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-29 14:25:04"
+        },
+        {
+          "id": 10,
+          "post_id": 14,
+          "author_uid": "26120001",
+          "author_nickname": "管理员·壹",
+          "content": "awa",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 00:43:10"
+        }
+      ],
+      "createdAt": "2026-08-29 12:30:16",
+      "updatedAt": "2026-08-30 00:57:11"
+    },
+    {
+      "id": 15,
+      "title": "hello",
+      "content": "现在发我算古人了",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 2,
+        "likes": 1,
+        "comments": 1
+      },
+      "author": {
+        "uid": "26120648",
+        "nickname": "IMP",
+        "role": "member"
+      },
+      "comments": [
+        {
+          "id": 13,
+          "post_id": 15,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "你的胆子真是肥嘟嘟的的～",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 02:50:30"
+        }
+      ],
+      "createdAt": "2026-08-30 02:06:42",
+      "updatedAt": "2026-08-30 02:06:42"
+    },
+    {
+      "id": 16,
+      "title": "。",
+      "content": "还是老用户",
+      "tags": [],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 5,
+        "likes": 0,
+        "comments": 1
+      },
+      "author": {
+        "uid": "26120630",
+        "nickname": "无敌暴龙机甲",
+        "role": "member"
+      },
+      "comments": [
+        {
+          "id": 14,
+          "post_id": 16,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "老了老了",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 02:52:00"
+        }
+      ],
+      "createdAt": "2026-08-30 02:26:03",
+      "updatedAt": "2026-08-30 02:26:03"
+    },
+    {
+      "id": 17,
+      "title": "wow",
+      "content": "wow",
+      "tags": [
+        "？"
+      ],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 3,
+        "likes": 0,
+        "comments": 1
+      },
+      "author": {
+        "uid": "26120623",
+        "nickname": "喜欢洛的洛",
+        "role": "member"
+      },
+      "comments": [
+        {
+          "id": 15,
+          "post_id": 17,
+          "author_uid": "00000001",
+          "author_nickname": "运维管理员",
+          "content": "wowowoowowoowowowowoowowowowowooowoo~",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 03:21:19"
+        }
+      ],
+      "createdAt": "2026-08-30 03:14:11",
+      "updatedAt": "2026-08-30 03:14:11"
+    },
+    {
+      "id": 18,
+      "title": "awa",
+      "content": "有什么想玩的想加的可以发帖@我",
+      "tags": [
+        "发疯🤪"
+      ],
+      "category": "meta",
+      "region": "2612",
+      "imageIds": [
+        1
+      ],
+      "isPinned": true,
+      "pinOrder": 1,
+      "isHidden": true,
+      "stats": {
+        "views": 4,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [],
+      "createdAt": "2026-08-30 03:23:18",
+      "updatedAt": "2026-08-30 03:23:18"
+    },
+    {
+      "id": 19,
+      "title": "awa",
+      "content": "有什么想玩的想加的可以发帖@我",
+      "tags": [],
+      "category": "meta",
+      "region": "2612",
+      "imageIds": [
+        2
+      ],
+      "isPinned": true,
+      "pinOrder": 2,
+      "isHidden": false,
+      "stats": {
+        "views": 7,
+        "likes": 0,
+        "comments": 1
+      },
+      "author": {
+        "uid": "00000001",
+        "nickname": "运维管理员",
+        "role": "ops_admin"
+      },
+      "comments": [
+        {
+          "id": 17,
+          "post_id": 19,
+          "author_uid": "26120645",
+          "author_nickname": "行",
+          "content": "能不能加看他人简介的功能，可以自己私信了解（社恐发言awa）",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 11:20:18"
+        }
+      ],
+      "createdAt": "2026-08-30 03:52:53",
+      "updatedAt": "2026-08-30 03:52:53"
+    },
+    {
+      "id": 20,
+      "title": "表白",
+      "content": "东北雨姐我喜欢你",
+      "tags": [
+        "恋爱"
+      ],
+      "category": "general",
+      "region": null,
+      "imageIds": [],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": false,
+      "stats": {
+        "views": 11,
+        "likes": 1,
+        "comments": 1
+      },
+      "author": {
+        "uid": "26120630",
+        "nickname": "无敌暴龙机甲",
+        "role": "member"
+      },
+      "comments": [
+        {
+          "id": 16,
+          "post_id": 20,
+          "author_uid": "26120635",
+          "author_nickname": "andreas",
+          "content": "wocal",
+          "reply_to_id": null,
+          "is_hidden": 0,
+          "created_at": "2026-08-30 04:06:04"
+        }
+      ],
+      "createdAt": "2026-08-30 04:01:59",
+      "updatedAt": "2026-08-30 04:01:59"
+    },
+    {
+      "id": 21,
+      "title": "纯吐槽，不针对任何人",
+      "content": "连脱产阶级都要过分控制压榨的可以上赶着给自己找个路灯了axa",
+      "tags": [
+        "＃吐槽"
+      ],
+      "category": "life",
+      "region": null,
+      "imageIds": [
+        4
+      ],
+      "isPinned": false,
+      "pinOrder": 0,
+      "isHidden": true,
+      "stats": {
+        "views": 1,
+        "likes": 0,
+        "comments": 0
+      },
+      "author": {
+        "uid": "26120627",
+        "nickname": "古月方典",
+        "role": "member"
+      },
+      "comments": [],
+      "createdAt": "2026-08-30 04:20:28",
+      "updatedAt": "2026-08-30 04:20:28"
+    }
+  ]
+}
